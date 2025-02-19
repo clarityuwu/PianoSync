@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- res/values/strings.xml -->
+<resources>
+    <string name="app_name">PianoSync</string>
+
+    <!-- Import Card -->
+    <string name="import_midi_title">Import MIDI File</string>
+    <string name="import_midi_description">Import MIDI</string>
+
+    <!-- MIDI File Card -->
+    <string name="midi_bpm_format">%1$d BPM</string>
+    <string name="midi_bpm_unknown"> BPM</string>
+
+    <!-- Delete Dialog -->
+    <string name="delete_dialog_title">Delete MIDI File</string>
+    <string name="delete_dialog_message">Do you want to remove "%1$s" from the list?</string>
+    <string name="delete_dialog_confirm">Delete</string>
+    <string name="delete_dialog_cancel">Cancel</string>
+</resources>
