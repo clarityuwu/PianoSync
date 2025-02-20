@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import io.pianosync.midi.data.manager.MidiPlaybackManager
 import io.pianosync.midi.data.model.MidiFile
@@ -42,31 +43,29 @@ fun NoteFallVisualizer(
     isPlaying: Boolean,
     bpm: Int,
     pianoConfig: PianoConfiguration,
-    pressedKeys: Set<Int>
+    pressedKeys: Set<Int>,
+    isPreLoading: Boolean // Added parameter
 ) {
     val noteHeight = 16.dp
-    val millisecondsOnScreen = remember(bpm) {
-        (20000L * (bpm.toFloat() / 120f)).toLong().coerceAtLeast(12000L)
-    }
+    val futureTimeWindow = 8000L
+    val configuration = LocalConfiguration.current
+    val visualizerHeight = configuration.screenHeightDp.dp - 135.dp
+    val playLinePosition = visualizerHeight - noteHeight
 
-    // Calculate width based on actual note range
     val totalWhiteKeys = (pianoConfig.minNote..pianoConfig.maxNote)
         .count { isWhiteKey(it) }
     val totalWidth = pianoConfig.keyWidth.dp * totalWhiteKeys
+    fun pixelsPerMs(): Float = playLinePosition.value / futureTimeWindow.toFloat()
 
-    // Calculate the dynamic height of the visualizer
-    val configuration = LocalConfiguration.current
-    val visualizerHeight = configuration.screenHeightDp.dp - 160.dp // Subtract the height of the piano
-
-    val playLinePosition = visualizerHeight - noteHeight
-
-    // Calculate note Y position - start at top (0) and move down to playLinePosition
     fun timeToYPosition(noteTime: Long): Float {
         val timeDiff = noteTime - currentTimeMs
-        val normalizedTime = timeDiff.toFloat() / millisecondsOnScreen.toFloat()
-        val invertedProgress = 1 - normalizedTime
-        return (invertedProgress * (visualizerHeight.value - noteHeight.value))
-            .coerceIn(0f, visualizerHeight.value)
+        val pixelsPerMs = playLinePosition.value / futureTimeWindow.toFloat()
+        val pianoHeight = 135f
+        return when {
+            timeDiff <= -1000 -> visualizerHeight.value + pianoHeight
+            timeDiff >= futureTimeWindow -> 0f
+            else -> playLinePosition.value - (timeDiff * pixelsPerMs)
+        }
     }
 
     fun calculateNoteXPosition(note: Int): Float {
@@ -83,22 +82,16 @@ fun NoteFallVisualizer(
         }
     }
 
-    val visibleNotes = notes.filter { note ->
-        val timeDiff = note.startTime - currentTimeMs
-        timeDiff in -1000..(millisecondsOnScreen * 2) &&
-                note.note in pianoConfig.minNote..pianoConfig.maxNote
-    }
-
-    // Debug logging
-    LaunchedEffect(currentTimeMs / 1000) { // Log every second
-        Log.d("NoteFallVisualizer", """
-            Total notes: ${notes.size}
-            Visible notes: ${visibleNotes.size}
-            Current time: $currentTimeMs
-            First note time: ${notes.firstOrNull()?.startTime}
-            Last note time: ${notes.lastOrNull()?.startTime}
-            Window: ${currentTimeMs - 500} to ${currentTimeMs + millisecondsOnScreen}
-        """.trimIndent())
+    val visibleNotes = if (isPreLoading) {
+        emptyList()
+    } else {
+        notes.filter { note ->
+            val startY = timeToYPosition(note.startTime)
+            val endY = timeToYPosition(note.startTime + note.duration)
+            (startY <= visualizerHeight.value || endY <= visualizerHeight.value) &&
+                    (startY >= 0f || endY >= 0f) &&
+                    note.note in pianoConfig.minNote..pianoConfig.maxNote
+        }
     }
 
     Box(
@@ -107,7 +100,6 @@ fun NoteFallVisualizer(
             .width(totalWidth)
             .horizontalScroll(rememberScrollState())
     ) {
-        // Play line at the bottom
         Box(
             modifier = Modifier
                 .offset(y = playLinePosition)
@@ -119,9 +111,16 @@ fun NoteFallVisualizer(
                 )
         )
 
-        // Draw notes falling from top
         visibleNotes.forEach { note ->
-            val yPos = timeToYPosition(note.startTime)
+            val startY = timeToYPosition(note.startTime)
+            val endY = timeToYPosition(note.startTime + note.duration)
+            val topY = minOf(startY, endY)
+            val baseHeight = (note.duration * pixelsPerMs()).coerceAtLeast(noteHeight.value)
+            val noteHeightPx = when {
+                startY >= playLinePosition.value -> baseHeight // Past play line, keep fixed height
+                endY <= 0f -> 0f // Not yet visible
+                else -> minOf(baseHeight, startY) // Cap height when approaching top
+            }
             val xPos = calculateNoteXPosition(note.note)
 
             val noteWidth = if (isWhiteKey(note.note)) {
@@ -131,33 +130,30 @@ fun NoteFallVisualizer(
             }
 
             val isCurrentlyPressed = note.note in pressedKeys
-            val isWithinPlayingWindow = abs(note.startTime - currentTimeMs) <= 100
+            val timeToPlay = note.startTime - currentTimeMs
+            val isBeingPlayed = timeToPlay in -note.duration..100
 
-            val noteColor = when {
-                isCurrentlyPressed && isWithinPlayingWindow -> Color(0xFF4CAF50)  // Green for correct hits
-                abs(note.startTime - currentTimeMs) <= 100 -> Color(0xFFFFEB3B)   // Yellow for current notes
-                note.isLeftHand -> Color(0xFF2196F3).copy(alpha = 0.9f)          // Blue for left hand
-                else -> Color(0xFFE91E63).copy(alpha = 0.9f)                     // Pink for right hand
+            if (noteHeightPx > 0 && topY < visualizerHeight.value) {
+                Box(
+                    modifier = Modifier
+                        .offset(x = xPos.dp, y = (startY - noteHeightPx).dp) // Bottom at startY
+                        .width(noteWidth)
+                        .height(noteHeightPx.dp)
+                        .background(
+                            color = when {
+                                isCurrentlyPressed && isBeingPlayed -> Color(0xFF4CAF50)
+                                !note.isLeftHand -> Color(0xFFE91E63)
+                                else -> Color(0xFF2196F3)
+                            },
+                            shape = RoundedCornerShape(2.dp)
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = Color.White,
+                            shape = RoundedCornerShape(2.dp)
+                        )
+                )
             }
-
-            Box(
-                modifier = Modifier
-                    .offset(
-                        x = xPos.dp,
-                        y = yPos.dp
-                    )
-                    .width(noteWidth)
-                    .height(noteHeight)
-                    .background(
-                        color = noteColor,
-                        shape = RoundedCornerShape(2.dp)
-                    )
-                    .border(
-                        width = 1.dp,
-                        color = Color.White.copy(alpha = 0.3f),
-                        shape = RoundedCornerShape(2.dp)
-                    )
-            )
         }
     }
 }
@@ -182,18 +178,39 @@ fun MidiPlayerScreen(
     var isInterfaceVisible by remember { mutableStateOf(true) }
     var currentBpm by remember { mutableStateOf(midiFile.bpm) }
     var showBpmDialog by remember { mutableStateOf(false) }
-    var countdownSeconds by remember { mutableStateOf(3) }
     val playbackManager = remember { MidiPlaybackManager(context, midiManager) }
     val pressedKeys by midiManager.pressedKeys.collectAsState()
     val isPlaybackActive by playbackManager.isPlaying.collectAsState()
-    val currentTimeMs by playbackManager.currentTimeMs.collectAsState()
+    var currentTimeMs by remember { mutableStateOf(0L) }
+    var isPreLoading by remember { mutableStateOf(true) }
 
     // State for notes and range
     var midiNotes by remember { mutableStateOf<List<MidiNote>>(emptyList()) }
     var pianoConfig by remember { mutableStateOf<PianoConfiguration?>(null) }
-    var startTimeOffset by remember { mutableStateOf(0L) }
 
-    // Calculate initial piano configuration from MIDI file
+    // Countdown and UI visibility state
+    var countdownSeconds by remember { mutableStateOf(3) }
+    var showCountdown by remember { mutableStateOf(true) }
+    var showTopBar by remember { mutableStateOf(true) }
+
+    // Collect current time separately to allow preloading
+    LaunchedEffect(Unit) {
+        playbackManager.currentTimeMs.collect { time ->
+            if (!isPreLoading) {
+                currentTimeMs = time
+            }
+        }
+    }
+
+    // Auto-hide timer for top bar
+    LaunchedEffect(showTopBar) {
+        if (showTopBar) {
+            delay(3000)
+            showTopBar = false
+        }
+    }
+
+    // Initial MIDI loading and visualization setup
     LaunchedEffect(midiFile, currentBpm) {
         try {
             val uri = Uri.parse(midiFile.path)
@@ -203,10 +220,6 @@ fun MidiPlayerScreen(
                     val minNote = notes.minOf { it.note }
                     val maxNote = notes.maxOf { it.note }
 
-                    // Find start time offset
-                    startTimeOffset = notes.minOf { it.startTime } - 2000 // 2 seconds before first note
-
-                    // Add minimal padding (2 notes) for visual context
                     val paddedMin = (minNote - 2).coerceAtLeast(21)
                     val paddedMax = (maxNote + 2).coerceAtMost(108)
 
@@ -215,9 +228,6 @@ fun MidiPlayerScreen(
                     val whiteKeyCount = (paddedMin..paddedMax).count { isWhiteKey(it) }
                     val keyWidth = (screenWidth / whiteKeyCount).coerceIn(30f, 60f)
 
-                    Log.d("MidiPlayer", "Note range: $minNote to $maxNote")
-                    Log.d("MidiPlayer", "Start time offset: $startTimeOffset")
-
                     pianoConfig = PianoConfiguration(
                         minNote = paddedMin,
                         maxNote = paddedMax,
@@ -225,20 +235,26 @@ fun MidiPlayerScreen(
                     )
                 }
                 midiNotes = notes
+
+                delay(3000)
+
+                // Start playback immediately but muted
+                playbackManager.startPlayback(midiFile, currentBpm ?: 120)
+                delay(100) // Small delay to ensure playback has started
+                isPreLoading = false
             }
         } catch (e: Exception) {
             Log.e("MidiPlayer", "Error loading MIDI file", e)
         }
     }
 
-    // Start playback after countdown
+    // Separate countdown effect
     LaunchedEffect(Unit) {
         while (countdownSeconds > 0) {
             delay(1000)
             countdownSeconds--
         }
-        delay(500)
-        playbackManager.startPlayback(midiFile, currentBpm ?: 120, startTimeOffset)
+        showCountdown = false
     }
 
     if (pianoConfig == null) {
@@ -248,113 +264,105 @@ fun MidiPlayerScreen(
         return
     }
 
-    // Load MIDI notes
-    LaunchedEffect(midiFile, currentBpm) {
-        try {
-            val uri = Uri.parse(midiFile.path)
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                midiNotes = MidiParser.parseMidiNotes(inputStream, currentBpm ?: 120)
-                Log.d("MidiPlayer", "Loaded ${midiNotes.size} notes")
-            }
-        } catch (e: Exception) {
-            Log.e("MidiPlayer", "Error loading MIDI file", e)
-        }
-    }
-
-    LaunchedEffect(countdownSeconds) {
-        if (countdownSeconds == 0) {
-            delay(500) // Small delay after countdown
-            isInterfaceVisible = false
-        }
-    }
-
-    // Reset playback when BPM changes
-    fun resetPlayback() {
-        playbackManager.resetPlayback()
-        playbackManager.startPlayback(midiFile, currentBpm ?: 120)
-    }
-
     Box(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures {
+                    showTopBar = true
+                }
+            }
     ) {
-        // Main content
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            // Top bar
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = midiFile.name,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBackPressed) {
-                        Icon(
-                            Icons.Default.ArrowBack,
-                            contentDescription = "Back"
+        Column(modifier = Modifier.fillMaxSize()) {
+            AnimatedVisibility(
+                visible = showTopBar,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            text = midiFile.name,
+                            style = MaterialTheme.typography.titleMedium
                         )
-                    }
-                },
-                actions = {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.height(48.dp)
-                    ) {
-                        TextButton(
-                            onClick = { showBpmDialog = true },
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                            modifier = Modifier.height(40.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Speed,
-                                contentDescription = "BPM",
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                "${currentBpm ?: 0}",
-                                style = MaterialTheme.typography.labelMedium
-                            )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBackPressed) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                         }
-                        IconButton(
-                            onClick = {
+                    },
+                    actions = {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.height(48.dp)
+                        ) {
+                            TextButton(
+                                onClick = { showBpmDialog = true },
+                                contentPadding = PaddingValues(horizontal = 8.dp),
+                                modifier = Modifier.height(40.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Speed,
+                                    contentDescription = "BPM",
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "${currentBpm ?: 0}",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+                            IconButton(onClick = {
                                 if (isPlaybackActive) {
                                     playbackManager.stopPlayback()
                                 } else {
                                     playbackManager.startPlayback(midiFile, currentBpm ?: 120)
                                 }
+                            }) {
+                                Icon(
+                                    imageVector = if (isPlaybackActive)
+                                        Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = if (isPlaybackActive)
+                                        "Pause" else "Play"
+                                )
                             }
-                        ) {
-                            Icon(
-                                imageVector = if (isPlaybackActive)
-                                    Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (isPlaybackActive)
-                                    "Pause" else "Play"
-                            )
                         }
                     }
-                }
-            )
+                )
+            }
 
-            // Note visualizer and piano
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .weight(1f)
             ) {
                 NoteFallVisualizer(
-                    modifier = Modifier
-                        .fillMaxSize(),
+                    modifier = Modifier.fillMaxSize(),
                     notes = midiNotes,
-                    currentTimeMs = currentTimeMs + startTimeOffset,
+                    currentTimeMs = currentTimeMs,
                     isPlaying = isPlaybackActive,
                     bpm = currentBpm ?: 120,
                     pianoConfig = pianoConfig!!,
-                    pressedKeys = pressedKeys
+                    pressedKeys = pressedKeys,
+                    isPreLoading = isPreLoading
                 )
+
+                // Show countdown overlay
+                if (showCountdown) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.5f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = countdownSeconds.toString(),
+                            style = MaterialTheme.typography.displayLarge,
+                            color = Color.White
+                        )
+                    }
+                }
 
                 PianoLayout(
                     modifier = Modifier
@@ -395,11 +403,11 @@ fun MidiPlayerScreen(
                         onClick = {
                             tempBpm.toIntOrNull()?.let { newBpm ->
                                 currentBpm = newBpm
-                                // Reset timing when BPM changes
-                                resetPlayback()
                                 scope.launch {
                                     repository.updateMidiBpm(midiFile.copy(bpm = newBpm))
                                 }
+                                playbackManager.resetPlayback()
+                                playbackManager.startPlayback(midiFile, newBpm)
                             }
                             showBpmDialog = false
                         }
@@ -421,7 +429,8 @@ data class MidiNote(
     val note: Int,
     val isLeftHand: Boolean,
     val startTime: Long,
-    val duration: Long
+    val duration: Long = 0L,
+    val velocity: Int = 64  // Changed from Velocity to Int for better MIDI compatibility
 )
 
 private fun isWhiteKey(note: Int): Boolean {

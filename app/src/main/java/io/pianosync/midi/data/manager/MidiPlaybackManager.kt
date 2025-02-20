@@ -43,38 +43,34 @@ class MidiPlaybackManager(
 
     fun startPlayback(midiFile: MidiFile, bpm: Int, offset: Long = 0L) {
         try {
+            // Stop any existing playback
+            stopPlayback()
+
+            // Set BPM and calculate playback speed
             currentBpm = bpm
             originalBpm = midiFile.bpm ?: 120
-            startTimeOffset = offset
-
-            // Calculate playback speed based on BPM ratio
-            // If BPM is very fast, we'll slow down the audio but speed up the time tracking
             val bpmRatio = currentBpm.toFloat() / originalBpm.toFloat()
-            playbackSpeed = if (bpmRatio > 2.0f) {
-                // For very fast BPMs, slow down audio but compensate with faster time tracking
-                2.0f
-            } else if (bpmRatio < 0.5f) {
-                // For very slow BPMs, ensure audio doesn't get too slow
-                0.5f
-            } else {
-                bpmRatio
+            playbackSpeed = when {
+                bpmRatio > 2.0f -> 2.0f
+                bpmRatio < 0.5f -> 0.5f
+                else -> bpmRatio
             }
 
+            // Initialize MediaPlayer
             val uri = Uri.parse(midiFile.path)
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(context, uri)
                 prepare()
-
                 // Set playback speed
-                PlaybackParams().apply {
-                    speed = playbackSpeed
-                    pitch = 1.0f  // Keep original pitch
-                    setPlaybackParams(this)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    setPlaybackParams(PlaybackParams().apply {
+                        speed = playbackSpeed
+                        pitch = 1.0f  // Preserve pitch
+                    })
                 }
-
-                setOnCompletionListener {
-                    stopPlayback()
-                }
+                // Seek to the offset
+                seekTo(offset.toInt())
+                setOnCompletionListener { stopPlayback() }
                 setOnErrorListener { _, what, extra ->
                     Log.e("MidiPlayback", "MediaPlayer error: $what, $extra")
                     _playbackError.value = "Error playing audio"
@@ -83,42 +79,23 @@ class MidiPlaybackManager(
                 }
             }
 
-            // Start playback and timing
+            // Initialize time tracking
+            _currentTimeMs.value = offset
+            val startRealTime = System.currentTimeMillis()
+
+            // Start playback
             mediaPlayer?.start()
             _isPlaying.value = true
-            lastPlayStartTime = System.currentTimeMillis()
 
-            // Start time tracking with BPM scaling and offset
+            // Time tracking coroutine
             playbackJob = coroutineScope.launch {
                 while (isActive && _isPlaying.value) {
                     val now = System.currentTimeMillis()
-                    val elapsedTime = (now - lastPlayStartTime)
-
-                    // Calculate scaled time based on BPM ratio
-                    val timeScale = currentBpm.toFloat() / (originalBpm.toFloat() * playbackSpeed)
-                    val scaledTime = (elapsedTime * timeScale).toLong()
-
-                    _currentTimeMs.value = accumulatedPlayTime + scaledTime
-
-                    Log.d("MidiPlayback", """
-                        Elapsed: $elapsedTime
-                        Scaled: $scaledTime
-                        Current: ${_currentTimeMs.value}
-                        BPM Scale: $timeScale
-                        Speed: $playbackSpeed
-                    """.trimIndent())
-
-                    delay(16) // ~60 FPS update
+                    val elapsedRealTime = now - startRealTime
+                    _currentTimeMs.value = offset + (elapsedRealTime * playbackSpeed).toLong()
+                    delay(16) // Approximately 60 FPS
                 }
             }
-
-            Log.d("MidiPlayback", """
-                Started playback:
-                Original BPM: $originalBpm
-                Target BPM: $currentBpm
-                Playback Speed: $playbackSpeed
-                Time Offset: $startTimeOffset
-            """.trimIndent())
         } catch (e: Exception) {
             _playbackError.value = "Error playing MIDI file: ${e.message}"
             Log.e("MidiPlayback", "Error starting playback", e)
@@ -128,7 +105,6 @@ class MidiPlaybackManager(
     fun stopPlayback() {
         playbackJob?.cancel()
         _isPlaying.value = false
-
         try {
             mediaPlayer?.stop()
             mediaPlayer?.release()
@@ -136,18 +112,12 @@ class MidiPlaybackManager(
         } catch (e: Exception) {
             Log.e("MidiPlayback", "Error stopping playback", e)
         }
-
-        // Scale accumulated time based on BPM ratio
-        val timeScale = currentBpm.toFloat() / (originalBpm.toFloat() * playbackSpeed)
-        val elapsedTime = System.currentTimeMillis() - lastPlayStartTime
-        accumulatedPlayTime += (elapsedTime * timeScale).toLong()
+        // No need to accumulate time here since startPlayback initializes anew
     }
 
     fun resetPlayback() {
         stopPlayback()
-        _currentTimeMs.value = startTimeOffset
-        accumulatedPlayTime = startTimeOffset
-        lastPlayStartTime = System.currentTimeMillis()
+        _currentTimeMs.value = 0L  // Reset to start, or keep startTimeOffset if desired
     }
 
     fun cleanup() {
