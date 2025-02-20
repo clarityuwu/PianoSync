@@ -1,7 +1,9 @@
 package io.pianosync.midi.ui.screens.home
 
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -33,14 +35,8 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val repository = remember(context) { MidiFileRepository(context) }
-    val midiManager = remember { MidiConnectionManager.getInstance(context) }
     val coroutineScope = rememberCoroutineScope()
-
     var midiFiles by remember { mutableStateOf<List<MidiFile>>(emptyList()) }
-    var showConnectionDialog by remember { mutableStateOf(false) }
-    var selectedMidiFile by remember { mutableStateOf<MidiFile?>(null) }
-
-    val isConnected by midiManager.isConnected.collectAsState()
 
     // Load saved MIDI files
     LaunchedEffect(repository) {
@@ -49,20 +45,16 @@ fun HomeScreen(
         }
     }
 
-    LaunchedEffect(isConnected) {
-        if (isConnected && selectedMidiFile != null) {
-            onNavigateToPlayer(selectedMidiFile!!)
-            selectedMidiFile = null
-            showConnectionDialog = false
-        }
-    }
-
-    // File picker launcher
+    // File picker launcher with permission handling
     val midiFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let { selectedUri ->
             try {
+                // Take persistent URI permission
+                val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(selectedUri, takeFlags)
+
                 context.contentResolver.query(selectedUri, null, null, null, null)?.use { cursor ->
                     val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                     if (cursor.moveToFirst()) {
@@ -71,7 +63,7 @@ fun HomeScreen(
 
                         val newMidiFile = MidiFile(
                             name = fileName,
-                            path = Uri.decode(selectedUri.toString()),
+                            path = selectedUri.toString(), // Store the raw URI string
                             dateImported = System.currentTimeMillis(),
                             bpm = bpm
                         )
@@ -83,6 +75,7 @@ fun HomeScreen(
                     }
                 }
             } catch (e: Exception) {
+                Log.e("HomeScreen", "Error importing MIDI file", e)
                 e.printStackTrace()
             }
         }
@@ -94,9 +87,9 @@ fun HomeScreen(
                 title = { Text("PianoSync") },
                 actions = {
                     Icon(
-                        imageVector = if (isConnected) Icons.Default.Piano else Icons.Default.PianoOff,
-                        contentDescription = if (isConnected) "Piano Connected" else "Piano Disconnected",
-                        tint = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        imageVector = Icons.Default.Piano,
+                        contentDescription = "Piano Connected",
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(end = 16.dp)
                     )
                 }
@@ -127,14 +120,7 @@ fun HomeScreen(
             items(midiFiles) { midiFile ->
                 MidiFileCard(
                     midiFile = midiFile,
-                    onClick = {
-                        if (isConnected) {
-                            onNavigateToPlayer(midiFile)
-                        } else {
-                            selectedMidiFile = midiFile
-                            showConnectionDialog = true
-                        }
-                    },
+                    onClick = { onNavigateToPlayer(midiFile) },
                     onDelete = {
                         midiFiles = midiFiles.filter { it != midiFile }
                         coroutineScope.launch {
@@ -142,49 +128,6 @@ fun HomeScreen(
                         }
                     }
                 )
-            }
-        }
-
-        // Connection dialog shown when needed
-        if (showConnectionDialog && !isConnected) {
-            Dialog(onDismissRequest = {
-                showConnectionDialog = false
-                selectedMidiFile = null
-            }) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.surface,
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(48.dp),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "Waiting for piano to connect...",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Please connect your piano to play ${selectedMidiFile?.name}",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = {
-                            showConnectionDialog = false
-                            selectedMidiFile = null
-                        }) {
-                            Text("Dismiss")
-                        }
-                    }
-                }
             }
         }
     }

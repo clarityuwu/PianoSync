@@ -37,22 +37,37 @@ class MidiPlaybackManager(
     private var lastPlayStartTime = 0L
     private var accumulatedPlayTime = 0L
     private var currentBpm = 120
-    private var originalBpm = 120 // Store the original MIDI file's BPM
+    private var originalBpm = 120
+    private var startTimeOffset = 0L
+    private var playbackSpeed = 1.0f
 
-    fun startPlayback(midiFile: MidiFile, bpm: Int) {
+    fun startPlayback(midiFile: MidiFile, bpm: Int, offset: Long = 0L) {
         try {
             currentBpm = bpm
-            originalBpm = midiFile.bpm ?: 120 // Get original BPM from MIDI file
-            val speedRatio = currentBpm.toFloat() / originalBpm.toFloat()
+            originalBpm = midiFile.bpm ?: 120
+            startTimeOffset = offset
+
+            // Calculate playback speed based on BPM ratio
+            // If BPM is very fast, we'll slow down the audio but speed up the time tracking
+            val bpmRatio = currentBpm.toFloat() / originalBpm.toFloat()
+            playbackSpeed = if (bpmRatio > 2.0f) {
+                // For very fast BPMs, slow down audio but compensate with faster time tracking
+                2.0f
+            } else if (bpmRatio < 0.5f) {
+                // For very slow BPMs, ensure audio doesn't get too slow
+                0.5f
+            } else {
+                bpmRatio
+            }
 
             val uri = Uri.parse(midiFile.path)
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(context, uri)
                 prepare()
 
-                // Set playback speed based on BPM ratio
+                // Set playback speed
                 PlaybackParams().apply {
-                    speed = speedRatio
+                    speed = playbackSpeed
                     pitch = 1.0f  // Keep original pitch
                     setPlaybackParams(this)
                 }
@@ -73,16 +88,37 @@ class MidiPlaybackManager(
             _isPlaying.value = true
             lastPlayStartTime = System.currentTimeMillis()
 
-            // Start time tracking without BPM scaling (since we're adjusting playback speed)
+            // Start time tracking with BPM scaling and offset
             playbackJob = coroutineScope.launch {
                 while (isActive && _isPlaying.value) {
                     val now = System.currentTimeMillis()
-                    _currentTimeMs.value = accumulatedPlayTime + (now - lastPlayStartTime)
+                    val elapsedTime = (now - lastPlayStartTime)
+
+                    // Calculate scaled time based on BPM ratio
+                    val timeScale = currentBpm.toFloat() / (originalBpm.toFloat() * playbackSpeed)
+                    val scaledTime = (elapsedTime * timeScale).toLong()
+
+                    _currentTimeMs.value = accumulatedPlayTime + scaledTime
+
+                    Log.d("MidiPlayback", """
+                        Elapsed: $elapsedTime
+                        Scaled: $scaledTime
+                        Current: ${_currentTimeMs.value}
+                        BPM Scale: $timeScale
+                        Speed: $playbackSpeed
+                    """.trimIndent())
+
                     delay(16) // ~60 FPS update
                 }
             }
 
-            Log.d("MidiPlayback", "Started playback with speed ratio: $speedRatio (Original BPM: $originalBpm, Target BPM: $currentBpm)")
+            Log.d("MidiPlayback", """
+                Started playback:
+                Original BPM: $originalBpm
+                Target BPM: $currentBpm
+                Playback Speed: $playbackSpeed
+                Time Offset: $startTimeOffset
+            """.trimIndent())
         } catch (e: Exception) {
             _playbackError.value = "Error playing MIDI file: ${e.message}"
             Log.e("MidiPlayback", "Error starting playback", e)
@@ -101,13 +137,16 @@ class MidiPlaybackManager(
             Log.e("MidiPlayback", "Error stopping playback", e)
         }
 
-        accumulatedPlayTime += System.currentTimeMillis() - lastPlayStartTime
+        // Scale accumulated time based on BPM ratio
+        val timeScale = currentBpm.toFloat() / (originalBpm.toFloat() * playbackSpeed)
+        val elapsedTime = System.currentTimeMillis() - lastPlayStartTime
+        accumulatedPlayTime += (elapsedTime * timeScale).toLong()
     }
 
     fun resetPlayback() {
         stopPlayback()
-        _currentTimeMs.value = 0
-        accumulatedPlayTime = 0
+        _currentTimeMs.value = startTimeOffset
+        accumulatedPlayTime = startTimeOffset
         lastPlayStartTime = System.currentTimeMillis()
     }
 

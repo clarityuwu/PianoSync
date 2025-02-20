@@ -41,35 +41,61 @@ fun NoteFallVisualizer(
     currentTimeMs: Long,
     isPlaying: Boolean,
     bpm: Int,
-    fixedPianoRange: Pair<Int, Int>,
-    keyWidth: Dp,
+    pianoConfig: PianoConfiguration,
     pressedKeys: Set<Int>
 ) {
-    val visualizerHeight = 400.dp
+    val visualizerHeight = 160.dp
     val noteHeight = 16.dp
-    val millisecondsOnScreen = 3000L
-    val playLinePosition = 350.dp
+    val millisecondsOnScreen = remember(bpm) {
+        // Increased base time and inverted BPM factor to show more notes at higher BPM
+        (12000L * (bpm.toFloat() / 120f)).toLong().coerceAtLeast(6000L)
+    }
+    val playLinePosition = visualizerHeight - noteHeight
 
-    // Calculate total width based on the number of white keys in range
-    val totalWhiteKeys = (fixedPianoRange.first..fixedPianoRange.second).count { isWhiteKey(it) }
-    val totalWidth = keyWidth * totalWhiteKeys
+    // Calculate width based on actual note range
+    val totalWhiteKeys = (pianoConfig.minNote..pianoConfig.maxNote)
+        .count { isWhiteKey(it) }
+    val totalWidth = pianoConfig.keyWidth.dp * totalWhiteKeys
 
+    // Calculate note Y position - start at top (0) and move down to playLinePosition
     fun timeToYPosition(noteTime: Long): Float {
         val timeDiff = noteTime - currentTimeMs
-        val position = playLinePosition.value - ((timeDiff.toFloat() / millisecondsOnScreen.toFloat()) * visualizerHeight.value)
-        return position.coerceIn(0f, visualizerHeight.value)
+        val normalizedTime = timeDiff.toFloat() / millisecondsOnScreen.toFloat()
+        val invertedProgress = 1 - normalizedTime
+        return (invertedProgress * (visualizerHeight.value - noteHeight.value))
+            .coerceIn(0f, visualizerHeight.value)
     }
 
     fun calculateNoteXPosition(note: Int): Float {
-        val whiteKeysBefore = (fixedPianoRange.first until note).count { isWhiteKey(it) }
+        val whiteKeysBefore = (pianoConfig.minNote until note)
+            .count { isWhiteKey(it) }
         return if (isWhiteKey(note)) {
-            whiteKeysBefore * keyWidth.value
+            whiteKeysBefore * pianoConfig.keyWidth
         } else {
-            // Position black keys between white keys
-            val prevWhiteKey = (note - 1 downTo fixedPianoRange.first).first { isWhiteKey(it) }
-            val whiteKeysBeforePrev = (fixedPianoRange.first until prevWhiteKey).count { isWhiteKey(it) }
-            (whiteKeysBeforePrev * keyWidth.value) + (keyWidth.value * 0.7f)
+            val prevWhiteKey = (note - 1 downTo pianoConfig.minNote)
+                .first { isWhiteKey(it) }
+            val whiteKeysBeforePrev = (pianoConfig.minNote until prevWhiteKey)
+                .count { isWhiteKey(it) }
+            (whiteKeysBeforePrev * pianoConfig.keyWidth) + (pianoConfig.keyWidth * 0.7f)
         }
+    }
+
+    val visibleNotes = notes.filter { note ->
+        val timeDiff = note.startTime - currentTimeMs
+        timeDiff in -1000..(millisecondsOnScreen * 2) &&
+                note.note in pianoConfig.minNote..pianoConfig.maxNote
+    }
+
+    // Debug logging
+    LaunchedEffect(currentTimeMs / 1000) { // Log every second
+        Log.d("NoteFallVisualizer", """
+            Total notes: ${notes.size}
+            Visible notes: ${visibleNotes.size}
+            Current time: $currentTimeMs
+            First note time: ${notes.firstOrNull()?.startTime}
+            Last note time: ${notes.lastOrNull()?.startTime}
+            Window: ${currentTimeMs - 500} to ${currentTimeMs + millisecondsOnScreen}
+        """.trimIndent())
     }
 
     Box(
@@ -78,48 +104,44 @@ fun NoteFallVisualizer(
             .width(totalWidth)
             .horizontalScroll(rememberScrollState())
     ) {
-        // Show only notes within the visible window and note range
-        val visibleNotes = notes.filter { note ->
-            val timeDiff = note.startTime - currentTimeMs
-            timeDiff in -1000..millisecondsOnScreen &&
-                    note.note in fixedPianoRange.first..fixedPianoRange.second
-        }
-
-        // Play line
+        // Play line at the bottom
         Box(
             modifier = Modifier
                 .offset(y = playLinePosition)
                 .fillMaxWidth()
                 .height(2.dp)
-                .background(Color.White.copy(alpha = 0.7f))
+                .background(
+                    color = Color.White.copy(alpha = 0.7f),
+                    shape = RoundedCornerShape(2.dp)
+                )
         )
 
-        // Draw notes
+        // Draw notes falling from top
         visibleNotes.forEach { note ->
             val yPos = timeToYPosition(note.startTime)
             val xPos = calculateNoteXPosition(note.note)
 
             val noteWidth = if (isWhiteKey(note.note)) {
-                (keyWidth.value * 0.8f).dp
+                (pianoConfig.keyWidth * 0.8f).dp
             } else {
-                (keyWidth.value * 0.6f).dp
+                (pianoConfig.keyWidth * 0.6f).dp
             }
 
             val isCurrentlyPressed = note.note in pressedKeys
-            val isWithinPlayingWindow = abs(note.startTime - currentTimeMs) <= 150
+            val isWithinPlayingWindow = abs(note.startTime - currentTimeMs) <= 100
 
             val noteColor = when {
-                isCurrentlyPressed && isWithinPlayingWindow -> Color(0xFF4CAF50)
-                abs(note.startTime - currentTimeMs) <= 150 -> Color(0xFFFFEB3B)
-                note.isLeftHand -> Color(0xFF2196F3).copy(alpha = 0.9f)
-                else -> Color(0xFFE91E63).copy(alpha = 0.9f)
+                isCurrentlyPressed && isWithinPlayingWindow -> Color(0xFF4CAF50)  // Green for correct hits
+                abs(note.startTime - currentTimeMs) <= 100 -> Color(0xFFFFEB3B)   // Yellow for current notes
+                note.isLeftHand -> Color(0xFF2196F3).copy(alpha = 0.9f)          // Blue for left hand
+                else -> Color(0xFFE91E63).copy(alpha = 0.9f)                     // Pink for right hand
             }
 
             Box(
                 modifier = Modifier
                     .offset(
                         x = xPos.dp,
-                        y = yPos.dp - noteHeight
+                        y = yPos.dp
                     )
                     .width(noteWidth)
                     .height(noteHeight)
@@ -136,6 +158,13 @@ fun NoteFallVisualizer(
         }
     }
 }
+
+data class PianoConfiguration(
+    val minNote: Int,
+    val maxNote: Int,
+    val keyWidth: Float
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MidiPlayerScreen(
@@ -156,40 +185,65 @@ fun MidiPlayerScreen(
     val isPlaybackActive by playbackManager.isPlaying.collectAsState()
     val currentTimeMs by playbackManager.currentTimeMs.collectAsState()
 
-    // State for note range
-    var noteRange by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    // State for notes and range
     var midiNotes by remember { mutableStateOf<List<MidiNote>>(emptyList()) }
-    var syncedNotes by remember { mutableStateOf(emptySet<Int>()) }
-    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    var pianoConfig by remember { mutableStateOf<PianoConfiguration?>(null) }
+    var startTimeOffset by remember { mutableStateOf(0L) }
 
-    val pianoConfig = remember(midiFile) {
+    // Calculate initial piano configuration from MIDI file
+    LaunchedEffect(midiFile, currentBpm) {
         try {
             val uri = Uri.parse(midiFile.path)
             context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                val notes = MidiParser.parseMidiNotes(inputStream, midiFile.bpm ?: 120)
+                val notes = MidiParser.parseMidiNotes(inputStream, currentBpm ?: 120)
                 if (notes.isNotEmpty()) {
                     val minNote = notes.minOf { it.note }
                     val maxNote = notes.maxOf { it.note }
-                    // Extend to nearest octave boundaries
-                    val extendedMin = (minNote - (minNote % 12))
-                    val extendedMax = (maxNote + (12 - (maxNote % 12)))
-                    val totalWhiteKeys = (extendedMin..extendedMax).count { isWhiteKey(it) }
 
-                    // Calculate key width to fit all keys
-                    val keyWidth = (screenWidth.value / totalWhiteKeys)
-                    Triple(extendedMin, extendedMax, keyWidth.dp)
-                } else {
-                    Triple(48, 72, 40.dp) // Default range if no notes found
+                    // Find start time offset
+                    startTimeOffset = notes.minOf { it.startTime } - 2000 // 2 seconds before first note
+
+                    // Add minimal padding (2 notes) for visual context
+                    val paddedMin = (minNote - 2).coerceAtLeast(21)
+                    val paddedMax = (maxNote + 2).coerceAtMost(108)
+
+                    val screenWidth = context.resources.displayMetrics.widthPixels /
+                            context.resources.displayMetrics.density
+                    val whiteKeyCount = (paddedMin..paddedMax).count { isWhiteKey(it) }
+                    val keyWidth = (screenWidth / whiteKeyCount).coerceIn(30f, 60f)
+
+                    Log.d("MidiPlayer", "Note range: $minNote to $maxNote")
+                    Log.d("MidiPlayer", "Start time offset: $startTimeOffset")
+
+                    pianoConfig = PianoConfiguration(
+                        minNote = paddedMin,
+                        maxNote = paddedMax,
+                        keyWidth = keyWidth
+                    )
                 }
-            } ?: Triple(48, 72, 40.dp)
+                midiNotes = notes
+            }
         } catch (e: Exception) {
-            Log.e("MidiPlayer", "Error calculating piano range", e)
-            Triple(48, 72, 40.dp) // Default range if loading fails
+            Log.e("MidiPlayer", "Error loading MIDI file", e)
         }
     }
 
-    val (minNote, maxNote, keyWidth) = pianoConfig
-    Log.d("MidiPlayer", "Piano range: $minNote to $maxNote, key width: $keyWidth")
+    // Start playback after countdown
+    LaunchedEffect(Unit) {
+        while (countdownSeconds > 0) {
+            delay(1000)
+            countdownSeconds--
+        }
+        delay(500)
+        playbackManager.startPlayback(midiFile, currentBpm ?: 120, startTimeOffset)
+    }
+
+    if (pianoConfig == null) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+        }
+        return
+    }
 
     // Load MIDI notes
     LaunchedEffect(midiFile, currentBpm) {
@@ -202,26 +256,6 @@ fun MidiPlayerScreen(
         } catch (e: Exception) {
             Log.e("MidiPlayer", "Error loading MIDI file", e)
         }
-    }
-
-    // Add effect to monitor playback state
-    LaunchedEffect(isPlaybackActive, currentTimeMs) {
-        if (isPlaybackActive) {
-            Log.d("MidiPlayer", "Playback active, time: $currentTimeMs")
-            Log.d("MidiPlayer", "Current visible notes: ${
-                midiNotes.count { note ->
-                    abs(note.startTime - currentTimeMs) <= 150
-                }
-            }")
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        repeat(3) {
-            delay(1000)
-            countdownSeconds--
-        }
-        playbackManager.startPlayback(midiFile, currentBpm ?: 120)
     }
 
     LaunchedEffect(countdownSeconds) {
@@ -238,142 +272,102 @@ fun MidiPlayerScreen(
     }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
-                detectTapGestures {
-                    if (!isInterfaceVisible) {
-                        isInterfaceVisible = true
-                        // Auto-hide after 3 seconds
-                        scope.launch {
-                            delay(3000)
-                            isInterfaceVisible = false
+        modifier = Modifier.fillMaxSize()
+    ) {
+        // Main content
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // Top bar
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        text = midiFile.name,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBackPressed) {
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = "Back"
+                        )
+                    }
+                },
+                actions = {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        TextButton(
+                            onClick = { showBpmDialog = true },
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            modifier = Modifier.height(40.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Speed,
+                                contentDescription = "BPM",
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                "${currentBpm ?: 0}",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                if (isPlaybackActive) {
+                                    playbackManager.stopPlayback()
+                                } else {
+                                    playbackManager.startPlayback(midiFile, currentBpm ?: 120)
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = if (isPlaybackActive)
+                                    Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (isPlaybackActive)
+                                    "Pause" else "Play"
+                            )
                         }
                     }
                 }
-            }
-    ) {
-        // Only show Scaffold when interface is visible
-        AnimatedVisibility(
-            visible = isInterfaceVisible,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
-            Scaffold(
-                topBar = {
-                    CenterAlignedTopAppBar(
-                        title = {
-                            Text(
-                                text = midiFile.name,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                        },
-                        navigationIcon = {
-                            IconButton(onClick = onBackPressed) {
-                                Icon(
-                                    Icons.Default.ArrowBack,
-                                    contentDescription = "Back"
-                                )
-                            }
-                        },
-                        actions = {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.height(48.dp)
-                            ) {
-                                TextButton(
-                                    onClick = { showBpmDialog = true },
-                                    contentPadding = PaddingValues(horizontal = 8.dp),
-                                    modifier = Modifier.height(40.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Speed,
-                                        contentDescription = "BPM",
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        "${currentBpm ?: 0}",
-                                        style = MaterialTheme.typography.labelMedium
-                                    )
-                                }
-                                IconButton(
-                                    onClick = {
-                                        if (isPlaybackActive) {
-                                            playbackManager.stopPlayback()
-                                        } else {
-                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120)
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = if (isPlaybackActive)
-                                            Icons.Default.Pause else Icons.Default.PlayArrow,
-                                        contentDescription = if (isPlaybackActive)
-                                            "Pause" else "Play"
-                                    )
-                                }
-                            }
-                        }
-                    )
-                }
-            ) { paddingValues ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues)
-                )
-            }
-        }
-        // Show countdown overlay
-        AnimatedVisibility(
-            visible = countdownSeconds > 0,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
+            )
+
+            // Note visualizer and piano
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.7f))
+                    .weight(1f)
             ) {
-                Text(
-                    text = countdownSeconds.toString(),
-                    style = MaterialTheme.typography.displayLarge,
-                    color = Color.White,
-                    modifier = Modifier.align(Alignment.Center)
+                NoteFallVisualizer(
+                    modifier = Modifier
+                        .fillMaxSize(),
+                    notes = midiNotes,
+                    currentTimeMs = currentTimeMs + startTimeOffset,
+                    isPlaying = isPlaybackActive,
+                    bpm = currentBpm ?: 120,
+                    pianoConfig = pianoConfig!!,
+                    pressedKeys = pressedKeys
+                )
+
+                PianoLayout(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(160.dp),
+                    pianoConfig = pianoConfig!!,
+                    pressedKeys = pressedKeys,
+                    currentNotes = midiNotes.filter { note ->
+                        abs(note.startTime - currentTimeMs) <= 150
+                    },
+                    syncedNotes = emptySet(),
+                    onNotePressed = { }
                 )
             }
         }
-
-        NoteFallVisualizer(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(400.dp),
-            notes = midiNotes,
-            currentTimeMs = currentTimeMs,
-            isPlaying = isPlaybackActive,
-            bpm = currentBpm ?: 120,
-            fixedPianoRange = Pair(minNote, maxNote),
-            keyWidth = keyWidth,
-            pressedKeys = pressedKeys
-        )
-
-        PianoLayout(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(160.dp),
-            noteRange = Pair(minNote, maxNote),
-            keyWidth = keyWidth,
-            pressedKeys = pressedKeys,
-            currentNotes = midiNotes.filter { note ->
-                abs(note.startTime - currentTimeMs) <= 150
-            },
-            syncedNotes = syncedNotes,
-            onNotePressed = { }
-        )
 
         // BPM Dialog
         if (showBpmDialog) {
@@ -437,16 +431,15 @@ private fun isWhiteKey(note: Int): Boolean {
 @Composable
 fun PianoLayout(
     modifier: Modifier = Modifier,
-    noteRange: Pair<Int, Int>,
-    keyWidth: Dp,
+    pianoConfig: PianoConfiguration,
     pressedKeys: Set<Int>,
     currentNotes: List<MidiNote>,
     syncedNotes: Set<Int>,
     onNotePressed: (Int) -> Unit
 ) {
-    val (minNote, maxNote) = noteRange
-    val totalWhiteKeys = (minNote..maxNote).count { isWhiteKey(it) }
-    val totalWidth = keyWidth * totalWhiteKeys
+    val totalWhiteKeys = (pianoConfig.minNote..pianoConfig.maxNote)
+        .count { isWhiteKey(it) }
+    val totalWidth = pianoConfig.keyWidth.dp * totalWhiteKeys
 
     Box(
         modifier = modifier
@@ -454,18 +447,20 @@ fun PianoLayout(
             .background(Color(0xFF1A1A1A))
             .border(2.dp, Color(0xFF333333))
             .padding(4.dp)
+            .horizontalScroll(rememberScrollState())
     ) {
         // White keys
         Row(
             modifier = Modifier.fillMaxSize(),
             horizontalArrangement = Arrangement.Start
         ) {
-            (minNote..maxNote).forEach { note ->
+            (pianoConfig.minNote..pianoConfig.maxNote).forEach { note ->
                 if (isWhiteKey(note)) {
                     WhiteKey(
-                        modifier = Modifier.width(keyWidth),
+                        modifier = Modifier.width(pianoConfig.keyWidth.dp),
                         note = note,
                         isPhysicallyPressed = note in pressedKeys,
+                        isHighlighted = currentNotes.any { it.note == note },
                         color = if (note in pressedKeys) Color(0xFF81C784) else Color.White,
                         onPressed = onNotePressed
                     )
@@ -475,15 +470,16 @@ fun PianoLayout(
 
         // Black keys
         Box(modifier = Modifier.fillMaxSize()) {
-            (minNote..maxNote).forEach { note ->
+            (pianoConfig.minNote..pianoConfig.maxNote).forEach { note ->
                 if (!isWhiteKey(note)) {
-                    val whiteKeysBefore = (minNote until note).count { isWhiteKey(it) }
-                    val xOffset = whiteKeysBefore * keyWidth.value + (keyWidth.value * 0.7f)
+                    val whiteKeysBefore = (pianoConfig.minNote until note).count { isWhiteKey(it) }
+                    val xOffset = whiteKeysBefore * pianoConfig.keyWidth + (pianoConfig.keyWidth * 0.7f)
 
                     BlackKey(
                         modifier = Modifier.offset(x = xOffset.dp),
                         note = note,
                         isPhysicallyPressed = note in pressedKeys,
+                        isHighlighted = currentNotes.any { it.note == note },
                         color = if (note in pressedKeys) Color(0xFF81C784) else Color(0xFF202020),
                         onPressed = onNotePressed
                     )
@@ -498,11 +494,12 @@ fun WhiteKey(
     modifier: Modifier = Modifier,
     note: Int,
     isPhysicallyPressed: Boolean = false,
+    isHighlighted: Boolean = false,
     color: Color = Color.White,
     onPressed: (Int) -> Unit
 ) {
     var isVirtuallyPressed by remember { mutableStateOf(false) }
-    val isPressed = isPhysicallyPressed || isVirtuallyPressed
+    val isPressed = isPhysicallyPressed || isVirtuallyPressed || isHighlighted
 
     Box(
         modifier = modifier
@@ -535,11 +532,12 @@ fun BlackKey(
     modifier: Modifier = Modifier,
     note: Int,
     isPhysicallyPressed: Boolean = false,
+    isHighlighted: Boolean = false,
     color: Color = Color(0xFF202020),
     onPressed: (Int) -> Unit
 ) {
     var isVirtuallyPressed by remember { mutableStateOf(false) }
-    val isPressed = isPhysicallyPressed || isVirtuallyPressed
+    val isPressed = isPhysicallyPressed || isVirtuallyPressed || isHighlighted
 
     Box(
         modifier = modifier
