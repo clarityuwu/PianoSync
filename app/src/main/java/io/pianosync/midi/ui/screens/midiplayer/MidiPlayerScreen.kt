@@ -44,18 +44,21 @@ fun NoteFallVisualizer(
     pianoConfig: PianoConfiguration,
     pressedKeys: Set<Int>
 ) {
-    val visualizerHeight = 160.dp
     val noteHeight = 16.dp
     val millisecondsOnScreen = remember(bpm) {
-        // Increased base time and inverted BPM factor to show more notes at higher BPM
-        (12000L * (bpm.toFloat() / 120f)).toLong().coerceAtLeast(6000L)
+        (20000L * (bpm.toFloat() / 120f)).toLong().coerceAtLeast(12000L)
     }
-    val playLinePosition = visualizerHeight - noteHeight
 
     // Calculate width based on actual note range
     val totalWhiteKeys = (pianoConfig.minNote..pianoConfig.maxNote)
         .count { isWhiteKey(it) }
     val totalWidth = pianoConfig.keyWidth.dp * totalWhiteKeys
+
+    // Calculate the dynamic height of the visualizer
+    val configuration = LocalConfiguration.current
+    val visualizerHeight = configuration.screenHeightDp.dp - 160.dp // Subtract the height of the piano
+
+    val playLinePosition = visualizerHeight - noteHeight
 
     // Calculate note Y position - start at top (0) and move down to playLinePosition
     fun timeToYPosition(noteTime: Long): Float {
