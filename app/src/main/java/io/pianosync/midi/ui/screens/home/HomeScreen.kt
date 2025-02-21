@@ -35,13 +35,27 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val repository = remember(context) { MidiFileRepository(context) }
+    val midiManager = remember { MidiConnectionManager.getInstance(context) }
     val coroutineScope = rememberCoroutineScope()
+
     var midiFiles by remember { mutableStateOf<List<MidiFile>>(emptyList()) }
+    var showConnectionDialog by remember { mutableStateOf(false) }
+    var selectedMidiFile by remember { mutableStateOf<MidiFile?>(null) }
+
+    val isConnected by midiManager.isConnected.collectAsState()
 
     // Load saved MIDI files
     LaunchedEffect(repository) {
         repository.midiFiles.collect { files ->
             midiFiles = files
+        }
+    }
+
+    LaunchedEffect(isConnected) {
+        if (isConnected && selectedMidiFile != null) {
+            onNavigateToPlayer(selectedMidiFile!!)
+            selectedMidiFile = null
+            showConnectionDialog = false
         }
     }
 
@@ -59,13 +73,14 @@ fun HomeScreen(
                     val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                     if (cursor.moveToFirst()) {
                         val fileName = cursor.getString(nameIndex)
-                        val bpm = MidiParser.extractBPM(context, selectedUri)
+                        val originalBpm = MidiParser.extractBPM(context, selectedUri)
 
                         val newMidiFile = MidiFile(
                             name = fileName,
-                            path = selectedUri.toString(), // Store the raw URI string
+                            path = selectedUri.toString(),
                             dateImported = System.currentTimeMillis(),
-                            bpm = bpm
+                            originalBpm = originalBpm,
+                            currentBpm = originalBpm // Initialize currentBpm to originalBpm
                         )
 
                         midiFiles = (listOf(newMidiFile) + midiFiles).take(10)
@@ -87,9 +102,9 @@ fun HomeScreen(
                 title = { Text("PianoSync") },
                 actions = {
                     Icon(
-                        imageVector = Icons.Default.Piano,
-                        contentDescription = "Piano Connected",
-                        tint = MaterialTheme.colorScheme.primary,
+                        imageVector = if (isConnected) Icons.Default.Piano else Icons.Default.PianoOff,
+                        contentDescription = if (isConnected) "Piano Connected" else "Piano Disconnected",
+                        tint = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(end = 16.dp)
                     )
                 }
@@ -120,7 +135,14 @@ fun HomeScreen(
             items(midiFiles) { midiFile ->
                 MidiFileCard(
                     midiFile = midiFile,
-                    onClick = { onNavigateToPlayer(midiFile) },
+                    onClick = {
+                        if (isConnected) {
+                            onNavigateToPlayer(midiFile)
+                        } else {
+                            selectedMidiFile = midiFile
+                            showConnectionDialog = true
+                        }
+                    },
                     onDelete = {
                         midiFiles = midiFiles.filter { it != midiFile }
                         coroutineScope.launch {
@@ -128,6 +150,49 @@ fun HomeScreen(
                         }
                     }
                 )
+            }
+        }
+
+        // Connection dialog shown when needed
+        if (showConnectionDialog && !isConnected) {
+            Dialog(onDismissRequest = {
+                showConnectionDialog = false
+                selectedMidiFile = null
+            }) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surface,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(48.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Waiting for piano to connect...",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Please connect your piano to play ${selectedMidiFile?.name}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(onClick = {
+                            showConnectionDialog = false
+                            selectedMidiFile = null
+                        }) {
+                            Text("Dismiss")
+                        }
+                    }
+                }
             }
         }
     }

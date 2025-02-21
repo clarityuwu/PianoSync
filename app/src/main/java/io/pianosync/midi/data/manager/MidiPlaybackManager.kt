@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import android.net.Uri
 import android.os.Build
 import io.pianosync.midi.data.model.MidiFile
+import io.pianosync.midi.ui.screens.player.MidiNote
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -34,12 +35,20 @@ class MidiPlaybackManager(
     val playbackError: StateFlow<String?> = _playbackError.asStateFlow()
 
     private var playbackJob: Job? = null
-    private var lastPlayStartTime = 0L
-    private var accumulatedPlayTime = 0L
     private var currentBpm = 120
     private var originalBpm = 120
     private var startTimeOffset = 0L
     private var playbackSpeed = 1.0f
+    private var playedNotes = mutableSetOf<MidiNote>()
+    private var pausedPosition = 0L
+
+    fun processNoteAtPlayLine(note: MidiNote, currentTime: Long) {
+        if (!_isPlaying.value || note in playedNotes) return
+
+        if (currentTime >= note.startTime && note !in playedNotes) {
+            playedNotes.add(note)
+        }
+    }
 
     fun startPlayback(midiFile: MidiFile, bpm: Int, offset: Long = 0L) {
         try {
@@ -48,7 +57,7 @@ class MidiPlaybackManager(
 
             // Set BPM and calculate playback speed
             currentBpm = bpm
-            originalBpm = midiFile.bpm ?: 120
+            originalBpm = midiFile.originalBpm ?: 120
             val bpmRatio = currentBpm.toFloat() / originalBpm.toFloat()
             playbackSpeed = when {
                 bpmRatio > 2.0f -> 2.0f
@@ -61,14 +70,12 @@ class MidiPlaybackManager(
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(context, uri)
                 prepare()
-                // Set playback speed
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     setPlaybackParams(PlaybackParams().apply {
                         speed = playbackSpeed
-                        pitch = 1.0f  // Preserve pitch
+                        pitch = 1.0f
                     })
                 }
-                // Seek to the offset
                 seekTo(offset.toInt())
                 setOnCompletionListener { stopPlayback() }
                 setOnErrorListener { _, what, extra ->
@@ -79,21 +86,19 @@ class MidiPlaybackManager(
                 }
             }
 
-            // Initialize time tracking
             _currentTimeMs.value = offset
+            startTimeOffset = offset
             val startRealTime = System.currentTimeMillis()
 
-            // Start playback
             mediaPlayer?.start()
             _isPlaying.value = true
 
-            // Time tracking coroutine
             playbackJob = coroutineScope.launch {
                 while (isActive && _isPlaying.value) {
                     val now = System.currentTimeMillis()
                     val elapsedRealTime = now - startRealTime
                     _currentTimeMs.value = offset + (elapsedRealTime * playbackSpeed).toLong()
-                    delay(16) // Approximately 60 FPS
+                    delay(16)
                 }
             }
         } catch (e: Exception) {
@@ -102,9 +107,35 @@ class MidiPlaybackManager(
         }
     }
 
+    fun pausePlayback() {
+        mediaPlayer?.pause()
+        _isPlaying.value = false
+        playbackJob?.cancel()
+        pausedPosition = _currentTimeMs.value
+    }
+
+    fun resumePlayback(midiFile: MidiFile) {
+        mediaPlayer?.apply {
+            seekTo(pausedPosition.toInt())
+            start()
+            _isPlaying.value = true
+
+            val startRealTime = System.currentTimeMillis()
+            playbackJob = coroutineScope.launch {
+                while (isActive && _isPlaying.value) {
+                    val now = System.currentTimeMillis()
+                    val elapsedRealTime = now - startRealTime
+                    _currentTimeMs.value = pausedPosition + (elapsedRealTime * playbackSpeed).toLong()
+                    delay(16)
+                }
+            }
+        }
+    }
+
     fun stopPlayback() {
         playbackJob?.cancel()
         _isPlaying.value = false
+        playedNotes.clear()
         try {
             mediaPlayer?.stop()
             mediaPlayer?.release()
@@ -112,12 +143,14 @@ class MidiPlaybackManager(
         } catch (e: Exception) {
             Log.e("MidiPlayback", "Error stopping playback", e)
         }
-        // No need to accumulate time here since startPlayback initializes anew
     }
 
     fun resetPlayback() {
         stopPlayback()
-        _currentTimeMs.value = 0L  // Reset to start, or keep startTimeOffset if desired
+        _currentTimeMs.value = 0L
+        startTimeOffset = 0L
+        pausedPosition = 0L
+        playedNotes.clear()
     }
 
     fun cleanup() {

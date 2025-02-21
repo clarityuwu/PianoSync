@@ -5,13 +5,15 @@ import android.net.Uri
 import android.util.Log
 import io.pianosync.midi.ui.screens.player.MidiNote
 import java.io.InputStream
+import com.pgf.mididroid.MidiFile
+import com.pgf.mididroid.event.MidiEvent
+import com.pgf.mididroid.event.NoteOn
+import com.pgf.mididroid.event.NoteOff
 
 /**
  * Utility object for parsing MIDI files
  */
 object MidiParser {
-    private const val HEADER_CHUNK_ID = "MThd"
-    private const val TRACK_CHUNK_ID = "MTrk"
 
     /**
      * Extracts the BPM from a MIDI file
@@ -63,96 +65,71 @@ object MidiParser {
      * @param bpm The tempo in beats per minute
      * @return List of MidiNotes with timing, duration, and hand information
      */
+
     fun parseMidiNotes(inputStream: InputStream, bpm: Int): List<MidiNote> {
-        val midiBytes = inputStream.readBytes()
-        val activeNotes = mutableMapOf<Pair<Int, Int>, ActiveNote>()
-        val completedNotes = mutableListOf<MidiNote>()
-
         try {
-            var index = 14 // Skip header
-            val ticksPerBeat = ((midiBytes[12].toInt() and 0xFF) shl 8) or (midiBytes[13].toInt() and 0xFF)
-            val microsPerBeat = 60_000_000L / bpm
-            var currentTrack = 0
+            val midiFile = MidiFile(inputStream)
+            val notes = mutableListOf<MidiNote>()
 
-            while (index < midiBytes.size - 4 && currentTrack < 2) {
-                if (String(midiBytes.slice(index..index + 3).toByteArray()) == TRACK_CHUNK_ID) {
-                    val trackLength = ((midiBytes[index + 4].toInt() and 0xFF) shl 24) or
-                            ((midiBytes[index + 5].toInt() and 0xFF) shl 16) or
-                            ((midiBytes[index + 6].toInt() and 0xFF) shl 8) or
-                            (midiBytes[index + 7].toInt() and 0xFF)
-                    var trackIndex = index + 8
-                    val trackEnd = trackIndex + trackLength
+            // Process each track
+            for (track in midiFile.tracks) {
+                val activeNotes = mutableMapOf<Int, Long>()
+                var currentTick = 0L
 
-                    var runningStatus = 0
-                    var absoluteTimeMs = 0L
-                    var absoluteTicks = 0L
+                for (event in track.events) {
+                    currentTick += event.delta
 
-                    while (trackIndex < trackEnd) {
-                        var deltaTicks = 0L
-                        var byte: Int
-                        do {
-                            byte = midiBytes[trackIndex++].toInt() and 0xFF
-                            deltaTicks = (deltaTicks shl 7) or (byte and 0x7F).toLong()
-                        } while (byte and 0x80 != 0 && trackIndex < trackEnd)
+                    // Convert ticks to milliseconds
+                    val timeMs = (currentTick * 60_000) / (bpm * midiFile.resolution)
 
-                        absoluteTicks += deltaTicks
-                        absoluteTimeMs = (absoluteTicks * microsPerBeat) / (ticksPerBeat * 1000)
+                    when (event) {
+                        is NoteOn -> {
+                            val note = event.noteValue
+                            val velocity = event.velocity
 
-                        byte = midiBytes[trackIndex].toInt() and 0xFF
-                        if (byte and 0x80 != 0) {
-                            runningStatus = byte
-                            trackIndex++
+                            if (velocity > 0) {
+                                activeNotes[note] = timeMs
+                            } else {
+                                // Note On with velocity 0 is Note Off
+                                handleNoteOff(note, timeMs, activeNotes, notes)
+                            }
                         }
-
-                        when (runningStatus and 0xF0) {
-                            0x90 -> {
-                                if (trackIndex + 1 >= trackEnd) break
-                                val note = midiBytes[trackIndex++].toInt() and 0xFF
-                                val velocity = midiBytes[trackIndex++].toInt() and 0xFF
-                                if (velocity > 0) {
-                                    activeNotes[Pair(note, currentTrack)] = ActiveNote(
-                                        note = note,
-                                        startTime = absoluteTimeMs,
-                                        velocity = velocity,
-                                        track = currentTrack
-                                    )
-                                } else {
-                                    handleNoteOff(note, absoluteTimeMs, currentTrack, activeNotes, completedNotes)
-                                }
-                            }
-                            0x80 -> {
-                                if (trackIndex + 1 >= trackEnd) break
-                                val note = midiBytes[trackIndex++].toInt() and 0xFF
-                                trackIndex++
-                                handleNoteOff(note, absoluteTimeMs, currentTrack, activeNotes, completedNotes)
-                            }
-                            else -> {
-                                if ((runningStatus and 0xF0) == 0xF0 || runningStatus == 0xFF) {
-                                    val length = midiBytes[trackIndex++].toInt() and 0xFF
-                                    trackIndex += length
-                                } else {
-                                    trackIndex += 2
-                                }
-                            }
+                        is NoteOff -> {
+                            val note = event.noteValue
+                            handleNoteOff(note, timeMs, activeNotes, notes)
                         }
                     }
-                    currentTrack++
-                    index = trackEnd
-                } else {
-                    index++
                 }
             }
 
-            val finalTime = completedNotes.maxOfOrNull { it.startTime + it.duration }
-            activeNotes.forEach { (key, activeNote) ->
-                handleNoteOff(key.first, finalTime, activeNote.track, activeNotes, completedNotes)
-            }
+            return notes.sortedBy { it.startTime }
 
-            Log.d("MidiParser", "Parsed ${completedNotes.size} notes from 2 tracks")
-            return completedNotes.sortedBy { it.startTime }
         } catch (e: Exception) {
-            Log.e("MidiParser", "Error parsing MIDI notes", e)
+            Log.e("MidiParser", "Error parsing MIDI file", e)
             return emptyList()
+        }
+    }
+
+    private fun handleNoteOff(
+        note: Int,
+        endTime: Long,
+        activeNotes: MutableMap<Int, Long>,
+        notes: MutableList<MidiNote>
+    ) {
+        val startTime = activeNotes.remove(note)
+        if (startTime != null) {
+            val duration = endTime - startTime
+            if (duration > 0) {
+                notes.add(
+                    MidiNote(
+                        note = note,
+                        startTime = startTime,
+                        duration = duration,
+                        isLeftHand = note < 60, // Simple hand separation based on middle C
+                        velocity = 100 // Default velocity
+                    )
+                )
+            }
         }
     }
 
@@ -162,31 +139,4 @@ object MidiParser {
         val velocity: Int,
         val track: Int
     )
-
-    private fun handleNoteOff(
-        note: Int,
-        time: Long?,
-        currentTrack: Int,
-        activeNotes: MutableMap<Pair<Int, Int>, ActiveNote>,
-        completedNotes: MutableList<MidiNote>
-    ) {
-        val key = Pair(note, currentTrack)
-        activeNotes[key]?.let { activeNote ->
-            val duration = time?.minus(activeNote.startTime)
-            if (duration != null) {
-                if (duration > 0) {
-                    completedNotes.add(
-                        MidiNote(
-                            note = note,
-                            startTime = activeNote.startTime,
-                            duration = duration,
-                            isLeftHand = currentTrack == 1,
-                            velocity = activeNote.velocity
-                        )
-                    )
-                }
-            }
-            activeNotes.remove(key)
-        }
-    }
 }

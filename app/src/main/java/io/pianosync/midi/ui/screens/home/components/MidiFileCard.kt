@@ -114,7 +114,7 @@ fun MidiFileCard(
                     modifier = Modifier.padding(bottom = 4.dp)
                 ) {
                     Text(
-                        text = midiFile.bpm?.let {
+                        text = midiFile.currentBpm?.let {
                             stringResource(R.string.midi_bpm_format, it)
                         } ?: stringResource(R.string.midi_bpm_unknown),
                         style = MaterialTheme.typography.labelSmall,

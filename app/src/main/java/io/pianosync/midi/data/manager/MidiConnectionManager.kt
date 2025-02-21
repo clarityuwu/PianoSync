@@ -17,7 +17,6 @@ class MidiConnectionManager private constructor(private val context: Context) {
     private var currentDevice: MidiDevice? = null
     private var midiReceiver: MidiReceiver? = null
     private var currentDeviceInfo: MidiDeviceInfo? = null
-
     @Volatile
     private var midiInputPort: MidiInputPort? = null
     private var midiOutputPort: MidiOutputPort? = null
@@ -26,10 +25,10 @@ class MidiConnectionManager private constructor(private val context: Context) {
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
     private val _pressedKeys = MutableStateFlow<Set<Int>>(emptySet())
+    private val _releasedKeys = MutableStateFlow<Set<Int>>(emptySet())
     val pressedKeys: StateFlow<Set<Int>> = _pressedKeys.asStateFlow()
-
+    val releasedKeys: StateFlow<Set<Int>> = _releasedKeys.asStateFlow()
     private val _errorMessage = MutableStateFlow<String?>(null)
-    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private val deviceCallback = object : MidiManager.DeviceCallback() {
@@ -85,22 +84,6 @@ class MidiConnectionManager private constructor(private val context: Context) {
         )
     }
 
-    @Synchronized
-    fun getMidiInputPort(): MidiInputPort? {
-        if (midiInputPort == null) {
-            Log.w("MidiConnection", "Input port is null, attempting to reopen")
-            currentDevice?.let { device ->
-                try {
-                    midiInputPort = device.openInputPort(0)
-                    Log.d("MidiConnection", "Reopened input port: ${midiInputPort != null}")
-                } catch (e: Exception) {
-                    Log.e("MidiConnection", "Failed to reopen input port", e)
-                }
-            }
-        }
-        return midiInputPort
-    }
-
     private fun setupMidiInput(device: MidiDevice) {
         try {
             Log.d("MidiConnection", "Setting up MIDI input for device: ${device.info.properties}")
@@ -125,16 +108,27 @@ class MidiConnectionManager private constructor(private val context: Context) {
                 return
             }
 
-            midiReceiver = object : MidiReceiver() {
+            val midiReceiver = object : MidiReceiver() {
                 override fun onSend(msg: ByteArray, offset: Int, count: Int, timestamp: Long) {
-                    if (count > 2 && msg[offset].toInt() and 0xF0 == 0x90) { // Note On
+                    if (count > 2) {
+                        val status = msg[offset].toInt() and 0xF0
                         val note = msg[offset + 1].toInt()
                         val velocity = msg[offset + 2].toInt()
 
-                        if (velocity > 0) {
-                            _pressedKeys.value = _pressedKeys.value + note
-                        } else {
-                            _pressedKeys.value = _pressedKeys.value - note
+                        when (status) {
+                            0x90 -> { // Note On
+                                if (velocity > 0) {
+                                    _pressedKeys.value = _pressedKeys.value + note
+                                    _releasedKeys.value = _releasedKeys.value - note
+                                } else { // Velocity 0 is treated as Note Off
+                                    _pressedKeys.value = _pressedKeys.value - note
+                                    _releasedKeys.value = _releasedKeys.value + note
+                                }
+                            }
+                            0x80 -> { // Note Off
+                                _pressedKeys.value = _pressedKeys.value - note
+                                _releasedKeys.value = _releasedKeys.value + note
+                            }
                         }
                     }
                 }
@@ -202,6 +196,8 @@ class MidiConnectionManager private constructor(private val context: Context) {
         }
         closeCurrentDevice()
     }
+
+
 
     companion object {
         @Volatile

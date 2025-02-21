@@ -29,7 +29,8 @@ class MidiFileRepository(private val context: Context) {
                     put("name", file.name)
                     put("path", file.path)
                     put("dateImported", file.dateImported)
-                    put("bpm", file.bpm)
+                    put("originalBpm", file.originalBpm)
+                    put("currentBpm", file.currentBpm)
                 })
             }
         }
@@ -43,7 +44,10 @@ class MidiFileRepository(private val context: Context) {
         val currentFiles = midiFiles.first()
         val updatedFiles = currentFiles.map { file ->
             if (file.path == midiFile.path) {
-                file.copy(bpm = midiFile.bpm)
+                file.copy(
+                    originalBpm = midiFile.originalBpm ?: file.originalBpm,
+                    currentBpm = midiFile.currentBpm
+                )
             } else {
                 file
             }
@@ -64,7 +68,8 @@ class MidiFileRepository(private val context: Context) {
                     name = obj.getString("name"),
                     path = obj.getString("path"),
                     dateImported = obj.getLong("dateImported"),
-                    bpm = if (obj.has("bpm")) obj.getDouble("bpm").toInt() else null
+                    originalBpm = if (obj.has("originalBpm")) obj.optInt("originalBpm").takeIf { it != 0 } else null,
+                    currentBpm = if (obj.has("currentBpm")) obj.optInt("currentBpm").takeIf { it != 0 } else null
                 )
             }
         } catch (e: Exception) {
