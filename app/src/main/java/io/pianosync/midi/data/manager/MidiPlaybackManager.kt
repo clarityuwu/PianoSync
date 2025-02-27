@@ -32,8 +32,7 @@ class MidiPlaybackManager(
     val currentTimeMs: StateFlow<Long> = _currentTimeMs.asStateFlow()
 
     private val _playbackError = MutableStateFlow<String?>(null)
-    val playbackError: StateFlow<String?> = _playbackError.asStateFlow()
-
+    private var onPlaybackCompletedCallback: (() -> Unit)? = null
     private var playbackJob: Job? = null
     private var currentBpm = 120
     private var originalBpm = 120
@@ -48,6 +47,10 @@ class MidiPlaybackManager(
         if (currentTime >= note.startTime && note !in playedNotes) {
             playedNotes.add(note)
         }
+    }
+
+    fun getOriginalBpm(): Int {
+        return originalBpm
     }
 
     fun startPlayback(midiFile: MidiFile, bpm: Int, offset: Long = 0L) {
@@ -77,7 +80,10 @@ class MidiPlaybackManager(
                     })
                 }
                 seekTo(offset.toInt())
-                setOnCompletionListener { stopPlayback() }
+                setOnCompletionListener {
+                    stopPlayback()
+                    onPlaybackCompletedCallback?.invoke()
+                }
                 setOnErrorListener { _, what, extra ->
                     Log.e("MidiPlayback", "MediaPlayer error: $what, $extra")
                     _playbackError.value = "Error playing audio"

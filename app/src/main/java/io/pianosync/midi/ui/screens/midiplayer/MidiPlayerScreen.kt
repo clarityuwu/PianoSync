@@ -2,20 +2,18 @@ package io.pianosync.midi.ui.screens.player
 
 import android.net.Uri
 import android.util.Log
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -24,26 +22,27 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import io.pianosync.midi.data.manager.MidiConnectionManager
 import io.pianosync.midi.data.manager.MidiPlaybackManager
 import io.pianosync.midi.data.model.MidiFile
 import io.pianosync.midi.data.parser.MidiParser
 import io.pianosync.midi.data.repository.MidiFileRepository
-import io.pianosync.midi.rememberMidiManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 import kotlin.math.absoluteValue
+import kotlin.math.roundToInt
 
 fun calculateNotePosition(
     note: Int,
@@ -71,14 +70,22 @@ fun NoteFallVisualizer(
     bpm: Int,
     pianoConfig: PianoConfiguration,
     isPreLoading: Boolean,
-    playbackManager: MidiPlaybackManager
+    playbackManager: MidiPlaybackManager,
+    correctlyPlayedNotes: MutableState<Set<Int>>,
+    pressedKeys: Set<Int>,
+    onNoteProcessed: () -> Unit
 ) {
+    // Fixed offset to compensate for the playback delay
+    val PLAYBACK_OFFSET_MS = 4500L  // 5 seconds offset
+    val CORRECT_NOTE_WINDOW = 300L
+
     val noteHeight = 16.dp
     val futureTimeWindow = 8000L
     val pastTimeWindow = 2000L
     val configuration = LocalConfiguration.current
     val visualizerHeight = (configuration.screenHeightDp).dp
     val playLinePosition = visualizerHeight - noteHeight
+    val processedNotes = remember { mutableStateOf<Set<MidiNote>>(emptySet()) }
 
     // Add manual X offset to align notes with keys
     val xOffset = 10.dp
@@ -87,12 +94,29 @@ fun NoteFallVisualizer(
     val whiteNoteWidth = whiteKeyWidth * 0.6f
     val blackNoteWidth = whiteKeyWidth * 0.4f
 
+    // Get original BPM from playback manager
+    val originalBpm = playbackManager.getOriginalBpm()
+    val speedRatio = if (originalBpm > 0) bpm.toFloat() / originalBpm.toFloat() else 1f
+
+    // This function positions notes vertically based on their time
     fun timeToYPosition(noteTime: Long): Float {
-        val timeDiff = noteTime - currentTimeMs
+        // Convert the note's time to playback time domain
+        val playbackTime = (noteTime / speedRatio).toLong()
+
+        // Add the fixed offset to compensate for the consistent delay
+        val adjustedPlaybackTime = playbackTime + PLAYBACK_OFFSET_MS
+
+        // Calculate position based on time difference to current playback time
+        val timeDiff = adjustedPlaybackTime - currentTimeMs
         val pixelsPerMs = playLinePosition.value / futureTimeWindow.toFloat()
+
         return when {
             timeDiff <= -pastTimeWindow -> visualizerHeight.value + 135f
-            timeDiff >= futureTimeWindow -> -noteHeight.value
+            timeDiff >= futureTimeWindow -> {
+                // Position future notes off-screen based on how far in the future they are
+                val extraOffset = ((timeDiff - futureTimeWindow) / 500f).coerceAtMost(200f)
+                -noteHeight.value - extraOffset
+            }
             else -> playLinePosition.value - (timeDiff * pixelsPerMs)
         }
     }
@@ -121,24 +145,71 @@ fun NoteFallVisualizer(
             val startY = timeToYPosition(note.startTime)
             val endY = timeToYPosition(note.startTime + note.duration)
 
-            // Keep note visible until it's completely past the piano
+            // More efficient filtering: only render notes that are within or approaching the visible area
+            // Extend the range slightly above screen (-300) to ensure smooth entry
             endY <= visualizerHeight.value + noteHeight.value &&
-                    startY >= -noteHeight.value &&
+                    startY <= visualizerHeight.value + 300f &&
+                    startY >= -300f &&  // Allow notes to start from further above
                     note.note in pianoConfig.minNote..pianoConfig.maxNote
+        }
+    }
+
+    LaunchedEffect(currentTimeMs, pressedKeys, isPlaying) {
+        if (isPlaying) {
+            // Find notes that are currently at the play line (using the offset)
+            val notesAtPlayLine = notes.filter { note ->
+                val playbackTime = (note.startTime / speedRatio).toLong() + PLAYBACK_OFFSET_MS
+                val timeDiff = currentTimeMs - playbackTime
+                timeDiff in 0..CORRECT_NOTE_WINDOW && // Within the correct timing window
+                        note !in processedNotes.value // Not already processed
+            }
+
+            // Check if any of these notes match keys being pressed
+            notesAtPlayLine.forEach { note ->
+                // Mark this note as processed so we don't count it twice
+                if (note !in processedNotes.value) {
+                    processedNotes.value = processedNotes.value + note
+                    onNoteProcessed() // Tell parent we processed a note
+
+                    if (note.note in pressedKeys) {
+                        // Note was correctly played!
+                        correctlyPlayedNotes.value = correctlyPlayedNotes.value + note.note
+                    }
+                }
+            }
+
+            // Also check for notes that have passed the play line without being played
+            val passedNotes = notes.filter { note ->
+                val playbackTime = (note.startTime / speedRatio).toLong() + PLAYBACK_OFFSET_MS
+                val timeDiff = currentTimeMs - playbackTime
+                timeDiff > CORRECT_NOTE_WINDOW && // Past the correct timing window
+                        note !in processedNotes.value // Not already processed
+            }
+
+            passedNotes.forEach { note ->
+                // Mark as processed so we don't count it twice
+                processedNotes.value = processedNotes.value + note
+                onNoteProcessed() // Tell parent we processed a note
+            }
         }
     }
 
     LaunchedEffect(currentTimeMs, isPlaying) {
         if (isPlaying) {
             visibleNotes.forEach { note ->
-                // Check if note is crossing the play line
-                if (note.startTime <= currentTimeMs &&
-                    note.startTime + note.duration > currentTimeMs - 100) { // Small buffer for timing
+                // Convert note times to playback time with the same offset
+                val playbackStartTime = (note.startTime / speedRatio).toLong() + PLAYBACK_OFFSET_MS
+                val playbackEndTime = ((note.startTime + note.duration) / speedRatio).toLong() + PLAYBACK_OFFSET_MS
+
+                // Check if note is crossing the play line in the playback time domain
+                if (playbackStartTime <= currentTimeMs &&
+                    playbackEndTime > currentTimeMs - 100) {
                     playbackManager.processNoteAtPlayLine(note, currentTimeMs)
                 }
             }
         }
     }
+
 
     Box(
         modifier = modifier
@@ -205,6 +276,29 @@ data class PianoConfiguration(
     val keyWidth: Float
 )
 
+@Composable
+fun StatisticItem(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MidiPlayerScreen(
@@ -219,10 +313,9 @@ fun MidiPlayerScreen(
     var showCountdown by remember { mutableStateOf(true) }
     val screenWidth = LocalConfiguration.current.screenWidthDp
     val horizontalPadding = 16 // Total horizontal padding
-    val currentlyPlayingNotes = remember { mutableStateOf<Set<Int>>(emptySet()) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var currentBpm by remember { mutableStateOf(midiFile.currentBpm ?: midiFile.originalBpm) }
+    var currentBpm by remember { mutableStateOf(midiFile.currentBpm) }
     var showBpmDialog by remember { mutableStateOf(false) }
     val midiConnectionManager = remember { MidiConnectionManager.getInstance(context) }
     val pressedKeys by midiConnectionManager.pressedKeys.collectAsState()
@@ -237,6 +330,92 @@ fun MidiPlayerScreen(
         midiNotes.filter { note ->
             note.startTime <= currentTimeMs &&
                     note.startTime + note.duration > currentTimeMs
+        }
+    }
+
+    var showScoreDialog by remember { mutableStateOf(false) }
+    var totalNotesPlayed by remember { mutableStateOf(0) }
+    var totalNotesInSong by remember { mutableStateOf(0) }
+    val correctlyPlayedNotes = remember { mutableStateOf<Set<Int>>(emptySet()) }
+    val missedNotes = remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var hasStartedPlaying by remember { mutableStateOf(false) }
+    var isNearEndOfSong by remember { mutableStateOf(false) }
+    var endOfSongTimerStarted by remember { mutableStateOf(false) }
+
+    // Track which notes have passed the play line
+    val processedNotes = remember { mutableStateOf<Set<MidiNote>>(emptySet()) }
+
+    // Calculate score as a derived state
+    val score = remember {
+        derivedStateOf {
+            if (totalNotesInSong == 0) 0
+            else (correctlyPlayedNotes.value.size.toFloat() / totalNotesInSong * 100).roundToInt()
+        }
+    }
+
+    LaunchedEffect(midiNotes) {
+        if (midiNotes.isNotEmpty()) {
+            totalNotesInSong = midiNotes.size
+        }
+    }
+
+    // This monitors the playback position but doesn't restart on each time update
+    LaunchedEffect(Unit) {
+        while (true) {
+            if (isPlaybackActive && midiNotes.isNotEmpty() && !isNearEndOfSong && !endOfSongTimerStarted) {
+                // Calculate the total estimated song duration
+                val lastNoteTime = midiNotes.maxOf { it.startTime + it.duration }
+                val speedRatio = (currentBpm ?: 120).toFloat() / (midiFile.originalBpm ?: 120).toFloat()
+                val estimatedDuration = lastNoteTime / speedRatio
+
+                // Check if we're near the end of the song
+                if (currentTimeMs > estimatedDuration * 0.95) {
+                    isNearEndOfSong = true
+                    Log.d("MidiPlayer", "Near end of song detected at $currentTimeMs / $estimatedDuration")
+                }
+            }
+            delay(100) // Check every 100ms instead of every frame
+        }
+    }
+
+// This handles the completion timer separately
+    LaunchedEffect(isNearEndOfSong) {
+        if (isNearEndOfSong && !endOfSongTimerStarted) {
+            endOfSongTimerStarted = true
+            Log.d("MidiPlayer", "Starting end of song timer")
+
+            // Wait for 2 seconds
+            delay(2000)
+
+            // If we're still near the end, show the dialog
+            if (isPlaybackActive) {
+                Log.d("MidiPlayer", "Song completion timer finished, showing score dialog")
+                playbackManager.pausePlayback()
+                showScoreDialog = true
+            }
+
+            // Reset tracking variables
+            isNearEndOfSong = false
+            endOfSongTimerStarted = false
+        }
+    }
+
+// Add a direct completion detection based on playback state
+    LaunchedEffect(isPlaybackActive) {
+        if (!isPlaybackActive && hasStartedPlaying && !isPreLoading && !showScoreDialog) {
+            hasStartedPlaying = false
+
+            // Check if we've played a significant portion
+            val lastNoteTime = if (midiNotes.isNotEmpty()) {
+                midiNotes.maxOf { it.startTime + it.duration }
+            } else 0L
+
+            if (currentTimeMs > lastNoteTime * 0.7) {
+                Log.d("MidiPlayer", "Playback stopped after significant progress, showing score")
+                showScoreDialog = true
+            }
+        } else if (isPlaybackActive && !hasStartedPlaying) {
+            hasStartedPlaying = true
         }
     }
 
@@ -257,7 +436,9 @@ fun MidiPlayerScreen(
         try {
             val uri = Uri.parse(midiFile.path)
             context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                val notes = MidiParser.parseMidiNotes(inputStream, currentBpm ?: 120)
+                // Always parse with the original BPM to get correct absolute times
+                val originalBpm = midiFile.originalBpm ?: 120
+                val notes = MidiParser.parseMidiNotes(inputStream, originalBpm)
                 if (notes.isNotEmpty()) {
                     val minNote = notes.minOf { it.note }
                     val maxNote = notes.maxOf { it.note }
@@ -437,8 +618,172 @@ fun MidiPlayerScreen(
                     bpm = currentBpm ?: 120,
                     pianoConfig = pianoConfig!!,
                     isPreLoading = isPreLoading,
-                    playbackManager = playbackManager
+                    playbackManager = playbackManager,
+                    correctlyPlayedNotes = correctlyPlayedNotes,
+                    pressedKeys = pressedKeys,
+                    onNoteProcessed = {
+                        // Make sure we're tracking processed notes
+                        totalNotesPlayed++
+                    }
                 )
+
+                if (showScoreDialog) {
+                    Dialog(
+                        onDismissRequest = {
+                            showScoreDialog = false
+                            // Reset states for potential replay
+                            correctlyPlayedNotes.value = emptySet()
+                            missedNotes.value = emptySet()
+                            processedNotes.value = emptySet()
+                            totalNotesPlayed = 0
+                        }
+                    ) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            shape = MaterialTheme.shapes.large,
+                            color = MaterialTheme.colorScheme.surface
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "Performance Results",
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(bottom = 16.dp)
+                                )
+
+                                // Big score display
+                                Box(
+                                    modifier = Modifier
+                                        .size(120.dp)
+                                        .padding(vertical = 8.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            color = MaterialTheme.colorScheme.primary
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "${score.value}%",
+                                        color = Color.White,
+                                        fontSize = 32.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // Statistics
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    StatisticItem(
+                                        label = "Notes Hit",
+                                        value = "${correctlyPlayedNotes.value.size}",
+                                        modifier = Modifier.weight(1f)
+                                    )
+
+                                    StatisticItem(
+                                        label = "Notes Missed",
+                                        value = "${missedNotes.value.size}",
+                                        modifier = Modifier.weight(1f)
+                                    )
+
+                                    StatisticItem(
+                                        label = "Total Notes",
+                                        value = "$totalNotesInSong",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // Grade based on score
+                                val grade = when(score.value) {
+                                    in 95..100 -> "A+"
+                                    in 90..94 -> "A"
+                                    in 85..89 -> "B+"
+                                    in 80..84 -> "B"
+                                    in 75..79 -> "C+"
+                                    in 70..74 -> "C"
+                                    in 60..69 -> "D"
+                                    else -> "Keep practicing!"
+                                }
+
+                                Text(
+                                    text = if (score.value >= 60) "Grade: $grade" else grade,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = when(score.value) {
+                                        in 90..100 -> Color(0xFF4CAF50) // Green for A grades
+                                        in 80..89 -> Color(0xFF8BC34A) // Light Green for B grades
+                                        in 70..79 -> Color(0xFFFFC107) // Amber for C grades
+                                        in 60..69 -> Color(0xFFFF9800) // Orange for D grades
+                                        else -> Color(0xFFF44336) // Red for failing
+                                    }
+                                )
+
+                                Spacer(modifier = Modifier.height(24.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceEvenly
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            showScoreDialog = false
+                                            // Reset and restart
+                                            correctlyPlayedNotes.value = emptySet()
+                                            missedNotes.value = emptySet()
+                                            processedNotes.value = emptySet()
+                                            totalNotesPlayed = 0
+
+                                            // Restart playback
+                                            playbackManager.resetPlayback()
+                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary
+                                        )
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Refresh,
+                                            contentDescription = "Retry",
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Try Again")
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            showScoreDialog = false
+                                            playbackManager.cleanup()
+                                            onBackPressed()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.secondary
+                                        )
+                                    ) {
+                                        Icon(
+                                            Icons.Default.ArrowBack,
+                                            contentDescription = "Back to Library",
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Back to Library")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 if (showCountdown) {
                     Box(

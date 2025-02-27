@@ -70,6 +70,7 @@ object MidiParser {
         try {
             val midiFile = MidiFile(inputStream)
             val notes = mutableListOf<MidiNote>()
+            val originalBpm = extractBPMFromMidiFile(midiFile) ?: bpm
 
             // Process each track
             for (track in midiFile.tracks) {
@@ -79,8 +80,9 @@ object MidiParser {
                 for (event in track.events) {
                     currentTick += event.delta
 
-                    // Convert ticks to milliseconds
-                    val timeMs = (currentTick * 60_000) / (bpm * midiFile.resolution)
+                    // Always use original BPM for parsing to get correct absolute times
+                    // The scaling for playback speed is handled in the PlaybackManager
+                    val timeMs = (currentTick * 60_000) / (originalBpm * midiFile.resolution)
 
                     when (event) {
                         is NoteOn -> {
@@ -110,6 +112,19 @@ object MidiParser {
         }
     }
 
+    // Helper function to extract BPM directly from MIDI file
+    private fun extractBPMFromMidiFile(midiFile: MidiFile): Int? {
+        for (track in midiFile.tracks) {
+            for (event in track.events) {
+                if (event is com.pgf.mididroid.event.meta.Tempo) {
+                    val mpqn = event.mpqn // Microseconds per quarter note
+                    return (60_000_000 / mpqn) // Convert to BPM
+                }
+            }
+        }
+        return null
+    }
+
     private fun handleNoteOff(
         note: Int,
         endTime: Long,
@@ -132,11 +147,5 @@ object MidiParser {
             }
         }
     }
-
-    private data class ActiveNote(
-        val note: Int,
-        val startTime: Long,
-        val velocity: Int,
-        val track: Int
-    )
+    
 }
