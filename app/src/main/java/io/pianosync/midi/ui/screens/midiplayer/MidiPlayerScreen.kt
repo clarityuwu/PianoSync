@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -282,8 +283,9 @@ data class PianoConfiguration(
     val keyWidth: Float
 )
 
+// Add this more compact StatisticItem composable
 @Composable
-fun StatisticItem(
+fun CompactStatisticItem(
     label: String,
     value: String,
     modifier: Modifier = Modifier
@@ -294,12 +296,12 @@ fun StatisticItem(
     ) {
         Text(
             text = value,
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.titleMedium, // Changed from titleLarge
             fontWeight = FontWeight.Bold
         )
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall, // Changed from bodyMedium
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
@@ -313,6 +315,7 @@ fun MidiPlayerScreen(
     onBackPressed: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Existing variable declarations...
     var showTopBar by remember { mutableStateOf(true) }
     var lastInteractionTime by remember { mutableStateOf(System.currentTimeMillis()) }
     var countdownSeconds by remember { mutableStateOf(3) }
@@ -331,6 +334,25 @@ fun MidiPlayerScreen(
     var isPreLoading by remember { mutableStateOf(true) }
     var midiNotes by remember { mutableStateOf<List<MidiNote>>(emptyList()) }
     var pianoConfig by remember { mutableStateOf<PianoConfiguration?>(null) }
+
+    // Add import statement for LocalView at the top of the file:
+    // import androidx.compose.ui.platform.LocalView
+
+    // Keep the screen on while playing
+    val view = LocalView.current
+    DisposableEffect(isPlaybackActive) {
+        if (isPlaybackActive) {
+            // Keep screen on when playback is active
+            view.keepScreenOn = true
+        } else {
+            // Allow screen to turn off when playback is inactive
+            view.keepScreenOn = false
+        }
+        onDispose {
+            // Make sure to reset when leaving the screen
+            view.keepScreenOn = false
+        }
+    }
 
     val activeNotes = remember(currentTimeMs, midiNotes) {
         midiNotes.filter { note ->
@@ -647,27 +669,27 @@ fun MidiPlayerScreen(
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
+                                .padding(12.dp), // Reduced from 16.dp
                             shape = MaterialTheme.shapes.large,
                             color = MaterialTheme.colorScheme.surface
                         ) {
                             Column(
                                 modifier = Modifier
-                                    .padding(24.dp),
+                                    .padding(16.dp), // Reduced from 24.dp
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
                                     text = "Performance Results",
-                                    style = MaterialTheme.typography.headlineSmall,
+                                    style = MaterialTheme.typography.titleMedium, // Changed from headlineSmall
                                     fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(bottom = 16.dp)
+                                    modifier = Modifier.padding(bottom = 8.dp) // Reduced from 16.dp
                                 )
 
-                                // Big score display
+                                // Smaller score display
                                 Box(
                                     modifier = Modifier
-                                        .size(120.dp)
-                                        .padding(vertical = 8.dp)
+                                        .size(90.dp) // Reduced from 120.dp
+                                        .padding(vertical = 4.dp) // Reduced from 8.dp
                                         .clip(CircleShape)
                                         .background(
                                             color = MaterialTheme.colorScheme.primary
@@ -677,38 +699,38 @@ fun MidiPlayerScreen(
                                     Text(
                                         text = "${score.value}%",
                                         color = Color.White,
-                                        fontSize = 32.sp,
+                                        fontSize = 24.sp, // Reduced from 32.sp
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.height(16.dp))
+                                Spacer(modifier = Modifier.height(8.dp)) // Reduced from 16.dp
 
-                                // Statistics
+                                // More compact statistics
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.SpaceEvenly // Changed from SpaceBetween
                                 ) {
-                                    StatisticItem(
+                                    CompactStatisticItem(
                                         label = "Notes Hit",
                                         value = "${correctlyPlayedNotes.value.size}",
                                         modifier = Modifier.weight(1f)
                                     )
 
-                                    StatisticItem(
+                                    CompactStatisticItem(
                                         label = "Notes Missed",
                                         value = "${missedNotes.value.size}",
                                         modifier = Modifier.weight(1f)
                                     )
 
-                                    StatisticItem(
-                                        label = "Total Notes",
-                                        value = "$totalNotesInSong",
+                                    CompactStatisticItem(
+                                        label = "Total",
+                                        value = "$totalNotesInSong", // Shortened label
                                         modifier = Modifier.weight(1f)
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.height(16.dp))
+                                Spacer(modifier = Modifier.height(8.dp)) // Reduced from 16.dp
 
                                 // Grade based on score
                                 val grade = when(score.value) {
@@ -724,7 +746,7 @@ fun MidiPlayerScreen(
 
                                 Text(
                                     text = if (score.value >= 60) "Grade: $grade" else grade,
-                                    style = MaterialTheme.typography.titleLarge,
+                                    style = MaterialTheme.typography.titleMedium, // Changed from titleLarge
                                     fontWeight = FontWeight.Bold,
                                     color = when(score.value) {
                                         in 90..100 -> Color(0xFF4CAF50) // Green for A grades
@@ -735,13 +757,15 @@ fun MidiPlayerScreen(
                                     }
                                 )
 
-                                Spacer(modifier = Modifier.height(24.dp))
+                                Spacer(modifier = Modifier.height(12.dp)) // Reduced from 24.dp
 
+                                // More compact buttons layout
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceEvenly
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp) // Added spacing instead of SpaceEvenly
                                 ) {
                                     Button(
+                                        modifier = Modifier.weight(1f), // Make buttons fill available width
                                         onClick = {
                                             showScoreDialog = false
                                             // Reset and restart
@@ -756,18 +780,23 @@ fun MidiPlayerScreen(
                                         },
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = MaterialTheme.colorScheme.primary
-                                        )
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp) // More compact padding
                                     ) {
                                         Icon(
                                             Icons.Default.Refresh,
                                             contentDescription = "Retry",
-                                            modifier = Modifier.size(20.dp)
+                                            modifier = Modifier.size(16.dp) // Smaller icon
                                         )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text("Try Again")
+                                        Spacer(modifier = Modifier.width(4.dp)) // Reduced from 8.dp
+                                        Text(
+                                            "Try Again",
+                                            style = MaterialTheme.typography.bodyMedium // Smaller text
+                                        )
                                     }
 
                                     Button(
+                                        modifier = Modifier.weight(1f), // Make buttons fill available width
                                         onClick = {
                                             showScoreDialog = false
                                             playbackManager.cleanup()
@@ -775,15 +804,19 @@ fun MidiPlayerScreen(
                                         },
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = MaterialTheme.colorScheme.secondary
-                                        )
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp) // More compact padding
                                     ) {
                                         Icon(
                                             Icons.Default.ArrowBack,
                                             contentDescription = "Back to Library",
-                                            modifier = Modifier.size(20.dp)
+                                            modifier = Modifier.size(16.dp) // Smaller icon
                                         )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text("Back to Library")
+                                        Spacer(modifier = Modifier.width(4.dp)) // Reduced from 8.dp
+                                        Text(
+                                            "Back", // Shortened label
+                                            style = MaterialTheme.typography.bodyMedium // Smaller text
+                                        )
                                     }
                                 }
                             }
