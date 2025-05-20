@@ -75,14 +75,20 @@ fun NoteFallVisualizer(
     pressedKeys: Set<Int>,
     onNoteProcessed: () -> Unit
 ) {
-    // Fixed offset to compensate for the playback delay
-    val PLAYBACK_OFFSET_MS = 4500L  // 5 seconds offset
+    // Get device configuration
+    val configuration = LocalConfiguration.current
+
+    // Determine if device is a tablet based on the smallest dimension
+    // Common tablet threshold is 600dp for the smallest dimension
+    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
+
+    // Fixed offset to compensate for the playback delay - different for phone and tablet
+    val PLAYBACK_OFFSET_MS = if (isTablet) 2000L else 4500L  // 2 seconds for tablets, 4.5 seconds for phones
     val CORRECT_NOTE_WINDOW = 300L
 
     val noteHeight = 16.dp
     val futureTimeWindow = 8000L
     val pastTimeWindow = 2000L
-    val configuration = LocalConfiguration.current
     val visualizerHeight = (configuration.screenHeightDp).dp
     val playLinePosition = visualizerHeight - noteHeight
     val processedNotes = remember { mutableStateOf<Set<MidiNote>>(emptySet()) }
@@ -368,11 +374,11 @@ fun MidiPlayerScreen(
                 val speedRatio = (currentBpm ?: 120).toFloat() / (midiFile.originalBpm ?: 120).toFloat()
                 val estimatedDuration = lastNoteTime / speedRatio
 
-                // Check if we're near the end of the song
-                if (currentTimeMs > estimatedDuration * 0.95) {
+                if (currentTimeMs > estimatedDuration * 0.999) {
                     isNearEndOfSong = true
                     Log.d("MidiPlayer", "Near end of song detected at $currentTimeMs / $estimatedDuration")
                 }
+
             }
             delay(100) // Check every 100ms instead of every frame
         }

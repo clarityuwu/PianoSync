@@ -42,7 +42,13 @@ fun HomeScreen(
     var showConnectionDialog by remember { mutableStateOf(false) }
     var selectedMidiFile by remember { mutableStateOf<MidiFile?>(null) }
 
+    // Debug mode - toggle this for testing without piano
+    var debugMode by remember { mutableStateOf(true) } // Set to true for testing
+
     val isConnected by midiManager.isConnected.collectAsState()
+
+    // For testing: consider connected if debug mode is on OR actually connected
+    val effectivelyConnected = debugMode || isConnected
 
     // Load saved MIDI files
     LaunchedEffect(repository) {
@@ -51,8 +57,8 @@ fun HomeScreen(
         }
     }
 
-    LaunchedEffect(isConnected) {
-        if (isConnected && selectedMidiFile != null) {
+    LaunchedEffect(effectivelyConnected) {
+        if (effectivelyConnected && selectedMidiFile != null) {
             onNavigateToPlayer(selectedMidiFile!!)
             selectedMidiFile = null
             showConnectionDialog = false
@@ -80,7 +86,7 @@ fun HomeScreen(
                             path = selectedUri.toString(),
                             dateImported = System.currentTimeMillis(),
                             originalBpm = originalBpm,
-                            currentBpm = originalBpm // Initialize currentBpm to originalBpm
+                            currentBpm = originalBpm
                         )
 
                         midiFiles = (listOf(newMidiFile) + midiFiles).take(10)
@@ -101,12 +107,24 @@ fun HomeScreen(
             CenterAlignedTopAppBar(
                 title = { Text("PianoSync") },
                 actions = {
-                    Icon(
-                        imageVector = if (isConnected) Icons.Default.Piano else Icons.Default.PianoOff,
-                        contentDescription = if (isConnected) "Piano Connected" else "Piano Disconnected",
-                        tint = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    // Show debug indicator and connection status
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(end = 16.dp)
-                    )
+                    ) {
+                        if (debugMode) {
+                            AssistChip(
+                                onClick = { debugMode = !debugMode },
+                                label = { Text("DEBUG") },
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                        }
+                        Icon(
+                            imageVector = if (effectivelyConnected) Icons.Default.Piano else Icons.Default.PianoOff,
+                            contentDescription = if (effectivelyConnected) "Piano Connected" else "Piano Disconnected",
+                            tint = if (effectivelyConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
             )
         }
@@ -136,7 +154,7 @@ fun HomeScreen(
                 MidiFileCard(
                     midiFile = midiFile,
                     onClick = {
-                        if (isConnected) {
+                        if (effectivelyConnected) {
                             onNavigateToPlayer(midiFile)
                         } else {
                             selectedMidiFile = midiFile
@@ -153,8 +171,8 @@ fun HomeScreen(
             }
         }
 
-        // Connection dialog shown when needed
-        if (showConnectionDialog && !isConnected) {
+        // Connection dialog - won't show in debug mode
+        if (showConnectionDialog && !effectivelyConnected) {
             Dialog(onDismissRequest = {
                 showConnectionDialog = false
                 selectedMidiFile = null
@@ -185,11 +203,19 @@ fun HomeScreen(
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = {
-                            showConnectionDialog = false
-                            selectedMidiFile = null
-                        }) {
-                            Text("Dismiss")
+                        Row {
+                            OutlinedButton(
+                                onClick = { debugMode = true },
+                                modifier = Modifier.padding(end = 8.dp)
+                            ) {
+                                Text("Test Mode")
+                            }
+                            Button(onClick = {
+                                showConnectionDialog = false
+                                selectedMidiFile = null
+                            }) {
+                                Text("Dismiss")
+                            }
                         }
                     }
                 }
