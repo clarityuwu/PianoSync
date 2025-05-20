@@ -307,6 +307,12 @@ fun CompactStatisticItem(
     }
 }
 
+enum class HandMode {
+    BOTH_HANDS,
+    LEFT_HAND_ONLY,
+    RIGHT_HAND_ONLY
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MidiPlayerScreen(
@@ -315,7 +321,7 @@ fun MidiPlayerScreen(
     onBackPressed: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Existing variable declarations...
+    var filteredMidiNotes by remember { mutableStateOf<List<MidiNote>>(emptyList()) }
     var showTopBar by remember { mutableStateOf(true) }
     var lastInteractionTime by remember { mutableStateOf(System.currentTimeMillis()) }
     var countdownSeconds by remember { mutableStateOf(3) }
@@ -333,12 +339,10 @@ fun MidiPlayerScreen(
     var currentTimeMs by remember { mutableStateOf(0L) }
     var isPreLoading by remember { mutableStateOf(true) }
     var midiNotes by remember { mutableStateOf<List<MidiNote>>(emptyList()) }
+    var currentHandMode by remember { mutableStateOf(HandMode.BOTH_HANDS) }
     var pianoConfig by remember { mutableStateOf<PianoConfiguration?>(null) }
 
-    // Add import statement for LocalView at the top of the file:
-    // import androidx.compose.ui.platform.LocalView
 
-    // Keep the screen on while playing
     val view = LocalView.current
     DisposableEffect(isPlaybackActive) {
         if (isPlaybackActive) {
@@ -381,9 +385,12 @@ fun MidiPlayerScreen(
         }
     }
 
-    LaunchedEffect(midiNotes) {
-        if (midiNotes.isNotEmpty()) {
-            totalNotesInSong = midiNotes.size
+    LaunchedEffect(midiNotes, currentHandMode) {
+        // Update the note count whenever the hand mode changes
+        when (currentHandMode) {
+            HandMode.LEFT_HAND_ONLY -> totalNotesInSong = midiNotes.count { it.isLeftHand }
+            HandMode.RIGHT_HAND_ONLY -> totalNotesInSong = midiNotes.count { !it.isLeftHand }
+            HandMode.BOTH_HANDS -> totalNotesInSong = midiNotes.size
         }
     }
 
@@ -467,6 +474,7 @@ fun MidiPlayerScreen(
                 // Always parse with the original BPM to get correct absolute times
                 val originalBpm = midiFile.originalBpm ?: 120
                 val notes = MidiParser.parseMidiNotes(inputStream, originalBpm)
+                midiNotes = notes
                 if (notes.isNotEmpty()) {
                     val minNote = notes.minOf { it.note }
                     val maxNote = notes.maxOf { it.note }
@@ -495,7 +503,7 @@ fun MidiPlayerScreen(
 
                 delay(100)
 
-                playbackManager.startPlayback(midiFile, currentBpm ?: 120)
+                playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
                 isPreLoading = false
             }
         } catch (e: Exception) {
@@ -571,7 +579,92 @@ fun MidiPlayerScreen(
                                     }
                                 }
                         ) {
-                            // BPM Button
+                            Box {
+                                var handMenuExpanded by remember { mutableStateOf(false) }
+
+                                TextButton(
+                                    onClick = {
+                                        lastInteractionTime = System.currentTimeMillis()
+                                        handMenuExpanded = true
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp),
+                                    modifier = Modifier.height(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = when (currentHandMode) {
+                                            HandMode.BOTH_HANDS -> Icons.Default.PanoramaHorizontal
+                                            HandMode.LEFT_HAND_ONLY -> Icons.Default.SwipeLeft
+                                            HandMode.RIGHT_HAND_ONLY -> Icons.Default.SwipeRight
+                                        },
+                                        contentDescription = "Hand Mode",
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = when (currentHandMode) {
+                                            HandMode.BOTH_HANDS -> "Both"
+                                            HandMode.LEFT_HAND_ONLY -> "Left"
+                                            HandMode.RIGHT_HAND_ONLY -> "Right"
+                                        },
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
+
+                                DropdownMenu(
+                                    expanded = handMenuExpanded,
+                                    onDismissRequest = { handMenuExpanded = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Both Hands") },
+                                        onClick = {
+                                            currentHandMode = HandMode.BOTH_HANDS
+                                            handMenuExpanded = false
+                                            // Reset and restart playback with the new hand mode
+                                            playbackManager.resetPlayback() // Stop and cleanup any old temp file
+                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Default.PanoramaHorizontal,
+                                                contentDescription = "Both Hands"
+                                            )
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Left Hand") },
+                                        onClick = {
+                                            currentHandMode = HandMode.LEFT_HAND_ONLY
+                                            handMenuExpanded = false
+                                            // Reset and restart playback with the new hand mode
+                                            playbackManager.resetPlayback()
+                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Default.SwipeLeft,
+                                                contentDescription = "Left Hand"
+                                            )
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Right Hand") },
+                                        onClick = {
+                                            currentHandMode = HandMode.RIGHT_HAND_ONLY
+                                            handMenuExpanded = false
+                                            // Reset and restart playback with the new hand mode
+                                            playbackManager.resetPlayback()
+                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Default.SwipeRight,
+                                                contentDescription = "Right Hand"
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+
                             TextButton(
                                 onClick = {
                                     lastInteractionTime = System.currentTimeMillis()
@@ -597,7 +690,7 @@ fun MidiPlayerScreen(
                                 onClick = {
                                     lastInteractionTime = System.currentTimeMillis()
                                     playbackManager.resetPlayback()
-                                    playbackManager.startPlayback(midiFile, currentBpm ?: 120)
+                                    playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
                                 }
                             ) {
                                 Icon(
@@ -616,7 +709,7 @@ fun MidiPlayerScreen(
                                         if (currentTimeMs > 0) {
                                             playbackManager.resumePlayback(midiFile)
                                         } else {
-                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120)
+                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
                                         }
                                     }
                                 }
@@ -640,7 +733,11 @@ fun MidiPlayerScreen(
             ) {
                 NoteFallVisualizer(
                     modifier = Modifier.fillMaxSize(),
-                    notes = midiNotes,
+                    notes = when (currentHandMode) {
+                        HandMode.LEFT_HAND_ONLY -> midiNotes.filter { it.isLeftHand }
+                        HandMode.RIGHT_HAND_ONLY -> midiNotes.filter { !it.isLeftHand }
+                        HandMode.BOTH_HANDS -> midiNotes
+                    },
                     currentTimeMs = currentTimeMs,
                     isPlaying = isPlaybackActive,
                     bpm = currentBpm ?: 120,
@@ -776,7 +873,7 @@ fun MidiPlayerScreen(
 
                                             // Restart playback
                                             playbackManager.resetPlayback()
-                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120)
+                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
                                         },
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = MaterialTheme.colorScheme.primary
@@ -889,10 +986,7 @@ fun MidiPlayerScreen(
                                     )
                                 }
                                 playbackManager.resetPlayback()
-                                playbackManager.startPlayback(
-                                    midiFile.copy(currentBpm = newBpm),
-                                    newBpm
-                                )
+                                playbackManager.startPlayback(midiFile.copy(currentBpm = newBpm), newBpm, 0L, midiNotes, currentHandMode)
                             }
                             showBpmDialog = false
                         }
