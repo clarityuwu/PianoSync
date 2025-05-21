@@ -1,4 +1,3 @@
-// io.pianosync.midi.data.manager.MidiPlaybackManager.kt
 package io.pianosync.midi.data.manager
 
 import android.content.Context
@@ -14,13 +13,13 @@ import kotlinx.coroutines.launch
 import android.net.Uri
 import android.os.Build
 import io.pianosync.midi.data.model.MidiFile
+import io.pianosync.midi.data.parser.MidiWriter
 import io.pianosync.midi.ui.screens.player.MidiNote
-import io.pianosync.midi.ui.screens.player.HandMode // Import HandMode
-import io.pianosync.midi.data.parser.MidiWriter // Import MidiWriter
+import io.pianosync.midi.ui.screens.player.HandMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import java.io.File // For deleting temp files
+import java.io.File
 
 class MidiPlaybackManager(
     private val context: Context,
@@ -35,6 +34,16 @@ class MidiPlaybackManager(
     private val _currentTimeMs = MutableStateFlow(0L)
     val currentTimeMs: StateFlow<Long> = _currentTimeMs.asStateFlow()
 
+    // Loop related state
+    private val _isLoopEnabled = MutableStateFlow(false)
+    val isLoopEnabled: StateFlow<Boolean> = _isLoopEnabled.asStateFlow()
+
+    private val _loopStartMs = MutableStateFlow(0L)
+    val loopStartMs: StateFlow<Long> = _loopStartMs.asStateFlow()
+
+    private val _loopEndMs = MutableStateFlow(0L)
+    val loopEndMs: StateFlow<Long> = _loopEndMs.asStateFlow()
+
     private val _playbackError = MutableStateFlow<String?>(null)
     private var onPlaybackCompletedCallback: (() -> Unit)? = null
     private var playbackJob: Job? = null
@@ -45,7 +54,9 @@ class MidiPlaybackManager(
     private var playedNotes = mutableSetOf<MidiNote>()
     private var pausedPosition = 0L
     private var tempMidiFileUri: Uri? = null // Store the URI of the temp file
-
+    private var currentMidiFile: MidiFile? = null
+    private var currentAllMidiNotes: List<MidiNote> = emptyList()
+    private var currentHandMode: HandMode = HandMode.BOTH_HANDS
 
     fun processNoteAtPlayLine(note: MidiNote, currentTime: Long) {
         if (!_isPlaying.value || note in playedNotes) return
@@ -59,14 +70,33 @@ class MidiPlaybackManager(
         return originalBpm
     }
 
+    // Set loop points
+    fun setLoopPoints(startMs: Long, endMs: Long) {
+        if (startMs < endMs) {
+            _loopStartMs.value = startMs
+            _loopEndMs.value = endMs
+        }
+    }
+
+    // Toggle loop mode
+    fun toggleLoopMode(enabled: Boolean) {
+        _isLoopEnabled.value = enabled
+    }
+
     // Modified startPlayback to accept all parsed notes and the hand mode
-    fun startPlayback(midiFile: MidiFile,
-                      bpm: Int,
-                      offset: Long = 0L,
-                      allMidiNotes: List<MidiNote>, // NEW: The full list of parsed MidiNotes
-                      handMode: HandMode // NEW: The selected hand mode
+    fun startPlayback(
+        midiFile: MidiFile,
+        bpm: Int,
+        offset: Long = 0L,
+        allMidiNotes: List<MidiNote>, // The full list of parsed MidiNotes
+        handMode: HandMode // The selected hand mode
     ) {
         try {
+            // Store these for potential looping
+            currentMidiFile = midiFile
+            currentAllMidiNotes = allMidiNotes
+            currentHandMode = handMode
+
             // Stop any existing playback and clean up previous temp file
             stopPlayback()
             deleteTempFile() // Ensure any old temp file is removed
@@ -110,9 +140,14 @@ class MidiPlaybackManager(
                 }
                 seekTo(offset.toInt())
                 setOnCompletionListener {
-                    stopPlayback()
-                    deleteTempFile() // Delete temp file on completion
-                    onPlaybackCompletedCallback?.invoke()
+                    if (_isLoopEnabled.value) {
+                        // If looping is enabled, jump back to loop start point
+                        seekToLoopStart()
+                    } else {
+                        stopPlayback()
+                        deleteTempFile() // Delete temp file on completion
+                        onPlaybackCompletedCallback?.invoke()
+                    }
                 }
                 setOnErrorListener { _, what, extra ->
                     Log.e("MidiPlayback", "MediaPlayer error: $what, $extra")
@@ -136,7 +171,13 @@ class MidiPlaybackManager(
                     // Adjust elapsed time by playback speed for accurate current time
                     val elapsedRealTime = now - startRealTime
                     _currentTimeMs.value = offset + (elapsedRealTime * playbackSpeed).toLong()
-                    delay(16) // Update roughly 60 times per second
+
+                    // Check if we need to loop
+                    if (_isLoopEnabled.value && _currentTimeMs.value >= _loopEndMs.value) {
+                        seekToLoopStart()
+                    }
+
+                    delay(8) // Update roughly 60 times per second
                 }
             }
         } catch (e: Exception) {
@@ -146,6 +187,41 @@ class MidiPlaybackManager(
         }
     }
 
+    // Seek to the loop start point
+    private fun seekToLoopStart() {
+        if (!_isLoopEnabled.value) return
+
+        val loopStartTime = _loopStartMs.value
+
+        mediaPlayer?.apply {
+            seekTo(loopStartTime.toInt())
+
+            // Reset playback tracking
+            startTimeOffset = loopStartTime
+            val startRealTime = System.currentTimeMillis()
+
+            playbackJob?.cancel()
+            playbackJob = coroutineScope.launch {
+                while (isActive && _isPlaying.value) {
+                    val now = System.currentTimeMillis()
+                    val elapsedRealTime = now - startRealTime
+                    _currentTimeMs.value = loopStartTime + (elapsedRealTime * playbackSpeed).toLong()
+
+                    // Check if we need to loop again
+                    if (_isLoopEnabled.value && _currentTimeMs.value >= _loopEndMs.value) {
+                        seekToLoopStart()
+                        break
+                    }
+
+                    delay(8)
+                }
+            }
+        }
+
+        // Reset played notes for the loop region
+        playedNotes.clear()
+    }
+
     fun pausePlayback() {
         mediaPlayer?.pause()
         _isPlaying.value = false
@@ -153,9 +229,6 @@ class MidiPlaybackManager(
         pausedPosition = _currentTimeMs.value
     }
 
-    // resumePlayback doesn't change the hand mode, it just continues.
-    // If you want hand mode changes during pause to apply on resume,
-    // you'd need to re-call startPlayback.
     fun resumePlayback(midiFile: MidiFile) {
         mediaPlayer?.apply {
             seekTo(pausedPosition.toInt())
@@ -168,7 +241,14 @@ class MidiPlaybackManager(
                     val now = System.currentTimeMillis()
                     val elapsedRealTime = now - startRealTime
                     _currentTimeMs.value = pausedPosition + (elapsedRealTime * playbackSpeed).toLong()
-                    delay(16)
+
+                    // Check if we need to loop
+                    if (_isLoopEnabled.value && _currentTimeMs.value >= _loopEndMs.value) {
+                        seekToLoopStart()
+                        break
+                    }
+
+                    delay(8)
                 }
             }
         }
@@ -195,6 +275,39 @@ class MidiPlaybackManager(
         pausedPosition = 0L
         playedNotes.clear()
         deleteTempFile() // Delete temp file on reset
+    }
+
+    // Manually seek to a specific position
+    fun seekTo(positionMs: Long) {
+        mediaPlayer?.seekTo(positionMs.toInt())
+        pausedPosition = positionMs
+        _currentTimeMs.value = positionMs
+
+        // If we were playing, update the start time for accurate tracking
+        if (_isPlaying.value) {
+            startTimeOffset = positionMs
+            val startRealTime = System.currentTimeMillis()
+
+            playbackJob?.cancel()
+            playbackJob = coroutineScope.launch {
+                while (isActive && _isPlaying.value) {
+                    val now = System.currentTimeMillis()
+                    val elapsedRealTime = now - startRealTime
+                    _currentTimeMs.value = positionMs + (elapsedRealTime * playbackSpeed).toLong()
+
+                    // Check if we need to loop
+                    if (_isLoopEnabled.value && _currentTimeMs.value >= _loopEndMs.value) {
+                        seekToLoopStart()
+                        break
+                    }
+
+                    delay(8)
+                }
+            }
+        }
+
+        // Clear played notes to reset visual state
+        playedNotes.clear()
     }
 
     fun cleanup() {

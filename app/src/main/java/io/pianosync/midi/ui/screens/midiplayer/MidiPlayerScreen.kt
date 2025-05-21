@@ -40,6 +40,7 @@ import io.pianosync.midi.data.manager.MidiPlaybackManager
 import io.pianosync.midi.data.model.MidiFile
 import io.pianosync.midi.data.parser.MidiParser
 import io.pianosync.midi.data.repository.MidiFileRepository
+import io.pianosync.midi.ui.screens.player.components.LoopControl
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
@@ -334,14 +335,17 @@ fun MidiPlayerScreen(
     var showBpmDialog by remember { mutableStateOf(false) }
     val midiConnectionManager = remember { MidiConnectionManager.getInstance(context) }
     val pressedKeys by midiConnectionManager.pressedKeys.collectAsState()
-    val playbackManager = remember { MidiPlaybackManager(context, midiConnectionManager) }
-    val isPlaybackActive by playbackManager.isPlaying.collectAsState()
-    var currentTimeMs by remember { mutableStateOf(0L) }
     var isPreLoading by remember { mutableStateOf(true) }
     var midiNotes by remember { mutableStateOf<List<MidiNote>>(emptyList()) }
     var currentHandMode by remember { mutableStateOf(HandMode.BOTH_HANDS) }
     var pianoConfig by remember { mutableStateOf<PianoConfiguration?>(null) }
-
+    val playbackManager = remember { MidiPlaybackManager(context, midiConnectionManager) }
+    var songDurationMs by remember { mutableStateOf(0L) }
+    val isPlaybackActive by playbackManager.isPlaying.collectAsState()
+    val isLoopEnabled by playbackManager.isLoopEnabled.collectAsState()
+    val loopStartMs by playbackManager.loopStartMs.collectAsState()
+    val loopEndMs by playbackManager.loopEndMs.collectAsState()
+    val currentTimeMs by playbackManager.currentTimeMs.collectAsState()
 
     val view = LocalView.current
     DisposableEffect(isPlaybackActive) {
@@ -466,7 +470,6 @@ fun MidiPlayerScreen(
         }
     }
 
-    // Initial MIDI loading and visualization setup
     LaunchedEffect(midiFile, currentBpm) {
         try {
             val uri = Uri.parse(midiFile.path)
@@ -475,7 +478,18 @@ fun MidiPlayerScreen(
                 val originalBpm = midiFile.originalBpm ?: 120
                 val notes = MidiParser.parseMidiNotes(inputStream, originalBpm)
                 midiNotes = notes
+
+                // Calculate song duration based on the last note end time
                 if (notes.isNotEmpty()) {
+                    val lastNoteEndTime = notes.maxOf { it.startTime + it.duration }
+                    songDurationMs = lastNoteEndTime
+                    Log.d("MidiPlayer", "Song duration calculated: $songDurationMs ms")
+
+                    // Set initial loop end to song duration if not already set via playbackManager
+                    if (loopEndMs == 0L) {
+                        playbackManager.setLoopPoints(0L, songDurationMs)
+                    }
+
                     val minNote = notes.minOf { it.note }
                     val maxNote = notes.maxOf { it.note }
 
@@ -493,7 +507,6 @@ fun MidiPlayerScreen(
                         keyWidth = keyWidth
                     )
                 }
-                midiNotes = notes
 
                 while (countdownSeconds > 0) {
                     delay(1000)
@@ -511,13 +524,9 @@ fun MidiPlayerScreen(
         }
     }
 
-    // Update current time from playback manager
-    LaunchedEffect(Unit) {
-        playbackManager.currentTimeMs.collect { time ->
-            if (!isPreLoading) {
-                currentTimeMs = time
-            }
-        }
+    LaunchedEffect(isLoopEnabled, loopStartMs, loopEndMs) {
+        playbackManager.toggleLoopMode(isLoopEnabled)
+        playbackManager.setLoopPoints(loopStartMs, loopEndMs)
     }
 
     if (pianoConfig == null) {
@@ -542,188 +551,208 @@ fun MidiPlayerScreen(
                 modifier = Modifier
                     .height(64.dp)
                     .fillMaxWidth()
-                    .background(Color(0xFF1A1A1A)) // Match the dark background color
+                    .background(Color(0xFF1A1A1A))
             ) {
-                CenterAlignedTopAppBar(
-                    modifier = Modifier.graphicsLayer {
-                        alpha = if (showTopBar) 1f else 0f
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = Color(0xFF1A1A1A) // Match the dark background color
-                    ),
-                    title = {
-                        Text(
-                            text = midiFile.name,
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = {
-                                playbackManager.cleanup()
-                                onBackPressed()
+                if (showTopBar) { // Only render the TopAppBar when visible
+                    CenterAlignedTopAppBar(
+                        modifier = Modifier
+                            .graphicsLayer {
+                                alpha = 1f // Always fully opaque when rendered
+                            },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = Color(0xFF1A1A1A)
+                        ),
+                        title = {
+                            Text(
+                                text = midiFile.name,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(
+                                onClick = {
+                                    playbackManager.cleanup()
+                                    onBackPressed()
+                                }
+                            ) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                             }
-                        ) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .height(48.dp)
-                                .pointerInput(Unit) {
-                                    detectTapGestures {
-                                        lastInteractionTime = System.currentTimeMillis()
+                        },
+                        actions = {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .height(48.dp)
+                                    .pointerInput(Unit) {
+                                        detectTapGestures {
+                                            lastInteractionTime = System.currentTimeMillis()
+                                        }
+                                    }
+                            ) {
+                                Box {
+                                    var handMenuExpanded by remember { mutableStateOf(false) }
+
+                                    TextButton(
+                                        onClick = {
+                                            lastInteractionTime = System.currentTimeMillis()
+                                            handMenuExpanded = true
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp),
+                                        modifier = Modifier.height(40.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = when (currentHandMode) {
+                                                HandMode.BOTH_HANDS -> Icons.Default.PanoramaHorizontal
+                                                HandMode.LEFT_HAND_ONLY -> Icons.Default.SwipeLeft
+                                                HandMode.RIGHT_HAND_ONLY -> Icons.Default.SwipeRight
+                                            },
+                                            contentDescription = "Hand Mode",
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = when (currentHandMode) {
+                                                HandMode.BOTH_HANDS -> "Both"
+                                                HandMode.LEFT_HAND_ONLY -> "Left"
+                                                HandMode.RIGHT_HAND_ONLY -> "Right"
+                                            },
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = handMenuExpanded,
+                                        onDismissRequest = { handMenuExpanded = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Both Hands") },
+                                            onClick = {
+                                                currentHandMode = HandMode.BOTH_HANDS
+                                                handMenuExpanded = false
+                                                // Reset and restart playback with the new hand mode
+                                                playbackManager.resetPlayback() // Stop and cleanup any old temp file
+                                                playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Default.PanoramaHorizontal,
+                                                    contentDescription = "Both Hands"
+                                                )
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Left Hand") },
+                                            onClick = {
+                                                currentHandMode = HandMode.LEFT_HAND_ONLY
+                                                handMenuExpanded = false
+                                                // Reset and restart playback with the new hand mode
+                                                playbackManager.resetPlayback()
+                                                playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Default.SwipeLeft,
+                                                    contentDescription = "Left Hand"
+                                                )
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Right Hand") },
+                                            onClick = {
+                                                currentHandMode = HandMode.RIGHT_HAND_ONLY
+                                                handMenuExpanded = false
+                                                // Reset and restart playback with the new hand mode
+                                                playbackManager.resetPlayback()
+                                                playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Default.SwipeRight,
+                                                    contentDescription = "Right Hand"
+                                                )
+                                            }
+                                        )
                                     }
                                 }
-                        ) {
-                            Box {
-                                var handMenuExpanded by remember { mutableStateOf(false) }
 
                                 TextButton(
                                     onClick = {
                                         lastInteractionTime = System.currentTimeMillis()
-                                        handMenuExpanded = true
+                                        // Toggle the loop mode through the playback manager
+                                        playbackManager.toggleLoopMode(!isLoopEnabled)
                                     },
                                     contentPadding = PaddingValues(horizontal = 8.dp),
                                     modifier = Modifier.height(40.dp)
                                 ) {
                                     Icon(
-                                        imageVector = when (currentHandMode) {
-                                            HandMode.BOTH_HANDS -> Icons.Default.PanoramaHorizontal
-                                            HandMode.LEFT_HAND_ONLY -> Icons.Default.SwipeLeft
-                                            HandMode.RIGHT_HAND_ONLY -> Icons.Default.SwipeRight
-                                        },
-                                        contentDescription = "Hand Mode",
+                                        Icons.Default.Loop,
+                                        contentDescription = "Loop",
+                                        modifier = Modifier.size(24.dp),
+                                        tint = if (isLoopEnabled) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.6f)
+                                    )
+                                }
+
+                                TextButton(
+                                    onClick = {
+                                        lastInteractionTime = System.currentTimeMillis()
+                                        showBpmDialog = true
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp),
+                                    modifier = Modifier.height(40.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Speed,
+                                        contentDescription = "BPM",
                                         modifier = Modifier.size(24.dp)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = when (currentHandMode) {
-                                            HandMode.BOTH_HANDS -> "Both"
-                                            HandMode.LEFT_HAND_ONLY -> "Left"
-                                            HandMode.RIGHT_HAND_ONLY -> "Right"
-                                        },
+                                        "${currentBpm ?: 0}",
                                         style = MaterialTheme.typography.labelMedium
                                     )
                                 }
 
-                                DropdownMenu(
-                                    expanded = handMenuExpanded,
-                                    onDismissRequest = { handMenuExpanded = false }
+                                // Restart Button
+                                IconButton(
+                                    onClick = {
+                                        lastInteractionTime = System.currentTimeMillis()
+                                        playbackManager.resetPlayback()
+                                        playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
+                                    }
                                 ) {
-                                    DropdownMenuItem(
-                                        text = { Text("Both Hands") },
-                                        onClick = {
-                                            currentHandMode = HandMode.BOTH_HANDS
-                                            handMenuExpanded = false
-                                            // Reset and restart playback with the new hand mode
-                                            playbackManager.resetPlayback() // Stop and cleanup any old temp file
-                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                Icons.Default.PanoramaHorizontal,
-                                                contentDescription = "Both Hands"
-                                            )
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Left Hand") },
-                                        onClick = {
-                                            currentHandMode = HandMode.LEFT_HAND_ONLY
-                                            handMenuExpanded = false
-                                            // Reset and restart playback with the new hand mode
-                                            playbackManager.resetPlayback()
-                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                Icons.Default.SwipeLeft,
-                                                contentDescription = "Left Hand"
-                                            )
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Right Hand") },
-                                        onClick = {
-                                            currentHandMode = HandMode.RIGHT_HAND_ONLY
-                                            handMenuExpanded = false
-                                            // Reset and restart playback with the new hand mode
-                                            playbackManager.resetPlayback()
-                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                Icons.Default.SwipeRight,
-                                                contentDescription = "Right Hand"
-                                            )
-                                        }
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = "Restart"
                                     )
                                 }
-                            }
 
-                            TextButton(
-                                onClick = {
-                                    lastInteractionTime = System.currentTimeMillis()
-                                    showBpmDialog = true
-                                },
-                                contentPadding = PaddingValues(horizontal = 8.dp),
-                                modifier = Modifier.height(40.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Speed,
-                                    contentDescription = "BPM",
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    "${currentBpm ?: 0}",
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            }
-
-                            // Restart Button
-                            IconButton(
-                                onClick = {
-                                    lastInteractionTime = System.currentTimeMillis()
-                                    playbackManager.resetPlayback()
-                                    playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
-                                }
-                            ) {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = "Restart"
-                                )
-                            }
-
-                            // Play/Pause Button
-                            IconButton(
-                                onClick = {
-                                    lastInteractionTime = System.currentTimeMillis()
-                                    if (isPlaybackActive) {
-                                        playbackManager.pausePlayback()
-                                    } else {
-                                        if (currentTimeMs > 0) {
-                                            playbackManager.resumePlayback(midiFile)
+                                // Play/Pause Button
+                                IconButton(
+                                    onClick = {
+                                        lastInteractionTime = System.currentTimeMillis()
+                                        if (isPlaybackActive) {
+                                            playbackManager.pausePlayback()
                                         } else {
-                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
+                                            if (currentTimeMs > 0) {
+                                                playbackManager.resumePlayback(midiFile)
+                                            } else {
+                                                playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
+                                            }
                                         }
                                     }
+                                ) {
+                                    Icon(
+                                        imageVector = if (isPlaybackActive)
+                                            Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = if (isPlaybackActive)
+                                            "Pause" else "Play"
+                                    )
                                 }
-                            ) {
-                                Icon(
-                                    imageVector = if (isPlaybackActive)
-                                        Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = if (isPlaybackActive)
-                                        "Pause" else "Play"
-                                )
                             }
                         }
-                    }
-                )
+                    )
+                }
             }
 
             Box(
@@ -936,17 +965,62 @@ fun MidiPlayerScreen(
                     }
                 }
 
-                PianoLayout(
+                Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .height(160.dp),
-                    pianoConfig = pianoConfig!!,
-                    pressedKeys = pressedKeys,
-                    currentNotes = activeNotes,
-                    syncedNotes = emptySet(),
-                    onNotePressed = { /* Optional: handle virtual key presses */ }
-                )
+                ) {
+                    // Only render loop control when visible
+                    if (showTopBar) {
+                        LoopControl(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            isLoopEnabled = isLoopEnabled,
+                            loopStartMs = loopStartMs,
+                            loopEndMs = loopEndMs,
+                            songDurationMs = songDurationMs,
+                            currentTimeMs = currentTimeMs,
+                            onLoopToggled = { enabled ->
+                                lastInteractionTime = System.currentTimeMillis()
+                                playbackManager.toggleLoopMode(enabled)
+                            },
+                            onSetLoopStart = {
+                                lastInteractionTime = System.currentTimeMillis()
+                                Log.d("MidiPlayer", "Setting loop start to current time: $currentTimeMs")
+                                val endPoint = if (loopEndMs <= currentTimeMs) songDurationMs else loopEndMs
+                                playbackManager.setLoopPoints(currentTimeMs, endPoint)
+                                playbackManager.toggleLoopMode(true)
+                            },
+                            onSetLoopEnd = {
+                                lastInteractionTime = System.currentTimeMillis()
+                                if (currentTimeMs > loopStartMs) {
+                                    Log.d("MidiPlayer", "Setting loop end to current time: $currentTimeMs")
+                                    playbackManager.setLoopPoints(loopStartMs, currentTimeMs)
+                                    playbackManager.toggleLoopMode(true)
+                                }
+                            },
+                            onSeekTo = { position ->
+                                lastInteractionTime = System.currentTimeMillis()
+                                Log.d("MidiPlayer", "Seeking to position: $position")
+                                playbackManager.seekTo(position)
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(85.dp))
+                    }
+
+                    // Piano keyboard (always visible)
+                    PianoLayout(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(160.dp),
+                        pianoConfig = pianoConfig!!,
+                        pressedKeys = pressedKeys,
+                        currentNotes = activeNotes,
+                        syncedNotes = emptySet(),
+                        onNotePressed = { /* Optional: handle virtual key presses */ }
+                    )
+                }
             }
         }
 
