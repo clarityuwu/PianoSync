@@ -35,12 +35,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import io.pianosync.midi.data.manager.MetronomeManager
 import io.pianosync.midi.data.manager.MidiConnectionManager
 import io.pianosync.midi.data.manager.MidiPlaybackManager
 import io.pianosync.midi.data.model.MidiFile
 import io.pianosync.midi.data.parser.MidiParser
 import io.pianosync.midi.data.repository.MidiFileRepository
 import io.pianosync.midi.ui.screens.player.components.LoopControl
+import io.pianosync.midi.ui.screens.player.components.MetronomeVisualizer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
@@ -322,7 +324,6 @@ fun MidiPlayerScreen(
     onBackPressed: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var filteredMidiNotes by remember { mutableStateOf<List<MidiNote>>(emptyList()) }
     var showTopBar by remember { mutableStateOf(true) }
     var lastInteractionTime by remember { mutableStateOf(System.currentTimeMillis()) }
     var countdownSeconds by remember { mutableStateOf(3) }
@@ -346,6 +347,11 @@ fun MidiPlayerScreen(
     val loopStartMs by playbackManager.loopStartMs.collectAsState()
     val loopEndMs by playbackManager.loopEndMs.collectAsState()
     val currentTimeMs by playbackManager.currentTimeMs.collectAsState()
+    val metronomeManager = remember { MetronomeManager(context) }
+    var metronomeEnabled by remember { mutableStateOf(false) }
+    val currentMetronomeBeat by metronomeManager.currentBeat.collectAsState()
+    val isMetronomeRunning by metronomeManager.isRunning.collectAsState()
+    var metronomeBeatCount by remember { mutableStateOf(4) }
 
     val view = LocalView.current
     DisposableEffect(isPlaybackActive) {
@@ -463,10 +469,22 @@ fun MidiPlayerScreen(
         showTopBar = false
     }
 
-    // Cleanup when leaving the screen
     DisposableEffect(Unit) {
         onDispose {
             playbackManager.cleanup()
+            metronomeManager.cleanup() // Add this line
+        }
+    }
+
+    LaunchedEffect(currentBpm) {
+        metronomeManager.updateBpm(currentBpm ?: 120)
+    }
+
+    LaunchedEffect(isPlaybackActive, metronomeEnabled) {
+        if (isPlaybackActive && metronomeEnabled) {
+            metronomeManager.start(currentBpm ?: 120, metronomeBeatCount)
+        } else if (!isPlaybackActive && isMetronomeRunning) {
+            metronomeManager.stop()
         }
     }
 
@@ -679,17 +697,24 @@ fun MidiPlayerScreen(
                                 TextButton(
                                     onClick = {
                                         lastInteractionTime = System.currentTimeMillis()
-                                        // Toggle the loop mode through the playback manager
-                                        playbackManager.toggleLoopMode(!isLoopEnabled)
+                                        metronomeEnabled = !metronomeEnabled
+
+                                        if (metronomeEnabled) {
+                                            if (isPlaybackActive) {
+                                                metronomeManager.start(currentBpm ?: 120, metronomeBeatCount)
+                                            }
+                                        } else {
+                                            metronomeManager.stop()
+                                        }
                                     },
                                     contentPadding = PaddingValues(horizontal = 8.dp),
                                     modifier = Modifier.height(40.dp)
                                 ) {
                                     Icon(
-                                        Icons.Default.Loop,
-                                        contentDescription = "Loop",
+                                        Icons.Default.Timer,
+                                        contentDescription = "Metronome",
                                         modifier = Modifier.size(24.dp),
-                                        tint = if (isLoopEnabled) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.6f)
+                                        tint = if (metronomeEnabled) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.6f)
                                     )
                                 }
 
@@ -950,6 +975,17 @@ fun MidiPlayerScreen(
                     }
                 }
 
+                if (metronomeEnabled) {
+                    MetronomeVisualizer(
+                        currentBeat = currentMetronomeBeat,
+                        beatsPerMeasure = metronomeBeatCount,
+                        isRunning = isMetronomeRunning && isPlaybackActive,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp)
+                    )
+                }
+
                 if (showCountdown) {
                     Box(
                         modifier = Modifier
@@ -1071,6 +1107,9 @@ fun MidiPlayerScreen(
                                 }
                                 playbackManager.resetPlayback()
                                 playbackManager.startPlayback(midiFile.copy(currentBpm = newBpm), newBpm, 0L, midiNotes, currentHandMode)
+
+                                // Add this line to update metronome:
+                                metronomeManager.updateBpm(newBpm)
                             }
                             showBpmDialog = false
                         }
