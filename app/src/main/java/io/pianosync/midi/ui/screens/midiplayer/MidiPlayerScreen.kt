@@ -965,62 +965,72 @@ fun MidiPlayerScreen(
                     }
                 }
 
-                Column(
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            // Fade in/out with the same alpha as the top bar
+                            alpha = if (showTopBar) 1f else 0f
+                        }
+                        // When hidden (alpha=0), block all pointer input events
+                        .pointerInput(showTopBar) {
+                            if (!showTopBar) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        awaitPointerEvent()
+                                    }
+                                }
+                            }
+                        }
+                ) {
+                    LoopControl(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        isLoopEnabled = isLoopEnabled,
+                        loopStartMs = loopStartMs,
+                        loopEndMs = loopEndMs,
+                        songDurationMs = songDurationMs,
+                        currentTimeMs = currentTimeMs,
+                        onLoopToggled = { enabled ->
+                            lastInteractionTime = System.currentTimeMillis() // Reset timer on interaction
+                            playbackManager.toggleLoopMode(enabled)
+                        },
+                        onSetLoopStart = {
+                            lastInteractionTime = System.currentTimeMillis() // Reset timer on interaction
+                            Log.d("MidiPlayer", "Setting loop start to current time: $currentTimeMs")
+                            val endPoint = if (loopEndMs <= currentTimeMs) songDurationMs else loopEndMs
+                            playbackManager.setLoopPoints(currentTimeMs, endPoint)
+                            playbackManager.toggleLoopMode(true)
+                        },
+                        onSetLoopEnd = {
+                            lastInteractionTime = System.currentTimeMillis() // Reset timer on interaction
+                            // Only set end if it's after start
+                            if (currentTimeMs > loopStartMs) {
+                                Log.d("MidiPlayer", "Setting loop end to current time: $currentTimeMs")
+                                playbackManager.setLoopPoints(loopStartMs, currentTimeMs)
+                                playbackManager.toggleLoopMode(true)
+                            }
+                        },
+                        onSeekTo = { position ->
+                            lastInteractionTime = System.currentTimeMillis() // Reset timer on interaction
+                            Log.d("MidiPlayer", "Seeking to position: $position")
+                            playbackManager.seekTo(position)
+                        }
+                    )
+                }
+
+                PianoLayout(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                ) {
-                    // Only render loop control when visible
-                    if (showTopBar) {
-                        LoopControl(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                            isLoopEnabled = isLoopEnabled,
-                            loopStartMs = loopStartMs,
-                            loopEndMs = loopEndMs,
-                            songDurationMs = songDurationMs,
-                            currentTimeMs = currentTimeMs,
-                            onLoopToggled = { enabled ->
-                                lastInteractionTime = System.currentTimeMillis()
-                                playbackManager.toggleLoopMode(enabled)
-                            },
-                            onSetLoopStart = {
-                                lastInteractionTime = System.currentTimeMillis()
-                                Log.d("MidiPlayer", "Setting loop start to current time: $currentTimeMs")
-                                val endPoint = if (loopEndMs <= currentTimeMs) songDurationMs else loopEndMs
-                                playbackManager.setLoopPoints(currentTimeMs, endPoint)
-                                playbackManager.toggleLoopMode(true)
-                            },
-                            onSetLoopEnd = {
-                                lastInteractionTime = System.currentTimeMillis()
-                                if (currentTimeMs > loopStartMs) {
-                                    Log.d("MidiPlayer", "Setting loop end to current time: $currentTimeMs")
-                                    playbackManager.setLoopPoints(loopStartMs, currentTimeMs)
-                                    playbackManager.toggleLoopMode(true)
-                                }
-                            },
-                            onSeekTo = { position ->
-                                lastInteractionTime = System.currentTimeMillis()
-                                Log.d("MidiPlayer", "Seeking to position: $position")
-                                playbackManager.seekTo(position)
-                            }
-                        )
-                        Spacer(modifier = Modifier.height(85.dp))
-                    }
-
-                    // Piano keyboard (always visible)
-                    PianoLayout(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(160.dp),
-                        pianoConfig = pianoConfig!!,
-                        pressedKeys = pressedKeys,
-                        currentNotes = activeNotes,
-                        syncedNotes = emptySet(),
-                        onNotePressed = { /* Optional: handle virtual key presses */ }
-                    )
-                }
+                        .height(160.dp),
+                    pianoConfig = pianoConfig!!,
+                    pressedKeys = pressedKeys,
+                    currentNotes = activeNotes,
+                    syncedNotes = emptySet(),
+                    onNotePressed = { /* Optional: handle virtual key presses */ }
+                )
             }
         }
 
