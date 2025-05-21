@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Piano
 import androidx.compose.material.icons.filled.PianoOff
 import androidx.compose.material3.*
@@ -31,6 +32,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun HomeScreen(
     onNavigateToPlayer: (MidiFile) -> Unit,
+    onNavigateToProgress: () -> Unit, // Add this parameter
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -119,6 +121,19 @@ fun HomeScreen(
                                 modifier = Modifier.padding(end = 8.dp)
                             )
                         }
+
+                        // Add Progress button
+                        IconButton(
+                            onClick = onNavigateToProgress,
+                            modifier = Modifier.padding(end = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.BarChart,
+                                contentDescription = "Progress Tracking",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
                         Icon(
                             imageVector = if (effectivelyConnected) Icons.Default.Piano else Icons.Default.PianoOff,
                             contentDescription = if (effectivelyConnected) "Piano Connected" else "Piano Disconnected",

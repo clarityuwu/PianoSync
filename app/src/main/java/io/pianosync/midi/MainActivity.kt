@@ -21,8 +21,10 @@ import androidx.navigation.navArgument
 import io.pianosync.midi.data.manager.MidiConnectionManager
 import io.pianosync.midi.data.model.MidiFile
 import io.pianosync.midi.data.repository.MidiFileRepository
+import io.pianosync.midi.data.repository.PerformanceRepository
 import io.pianosync.midi.ui.screens.home.HomeScreen
 import io.pianosync.midi.ui.screens.player.MidiPlayerScreen
+import io.pianosync.midi.ui.screens.progress.ProgressTrackingScreen
 import io.pianosync.midi.ui.theme.PianoSyncTheme
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -45,6 +47,10 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 val context = LocalContext.current
                 val repository = remember(context) { MidiFileRepository(context) }
+
+                // Add Performance Repository initialization
+                val performanceRepository = remember(context) { PerformanceRepository(context) }
+
                 var loadedMidiFiles by remember { mutableStateOf<List<MidiFile>>(emptyList()) }
 
                 // Share midiManager with composables
@@ -66,10 +72,25 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToPlayer = { midiFile ->
                                     val encodedPath = URLEncoder.encode(midiFile.path, "UTF-8")
                                     navController.navigate("player/$encodedPath")
+                                },
+                                onNavigateToProgress = {
+                                    navController.navigate("progress")
                                 }
                             )
                         }
 
+                        // Add Progress screen route
+                        composable("progress") {
+                            ProgressTrackingScreen(
+                                midiFileRepository = repository,
+                                performanceRepository = performanceRepository,
+                                onBackPressed = {
+                                    navController.popBackStack()
+                                }
+                            )
+                        }
+
+                        // Existing player route
                         composable(
                             route = "player/{midiFilePath}",
                             arguments = listOf(
@@ -91,6 +112,7 @@ class MainActivity : ComponentActivity() {
                                 MidiPlayerScreen(
                                     midiFile = midiFile,
                                     repository = repository,
+                                    performanceRepository = performanceRepository, // Pass the repository
                                     onBackPressed = {
                                         navController.popBackStack()
                                     }

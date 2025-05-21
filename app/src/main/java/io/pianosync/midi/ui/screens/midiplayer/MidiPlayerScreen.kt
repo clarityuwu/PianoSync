@@ -39,8 +39,11 @@ import io.pianosync.midi.data.manager.MetronomeManager
 import io.pianosync.midi.data.manager.MidiConnectionManager
 import io.pianosync.midi.data.manager.MidiPlaybackManager
 import io.pianosync.midi.data.model.MidiFile
+import io.pianosync.midi.data.model.PerformanceRecord
+import io.pianosync.midi.data.model.PlayedNote
 import io.pianosync.midi.data.parser.MidiParser
 import io.pianosync.midi.data.repository.MidiFileRepository
+import io.pianosync.midi.data.repository.PerformanceRepository
 import io.pianosync.midi.ui.screens.player.components.LoopControl
 import io.pianosync.midi.ui.screens.player.components.MetronomeVisualizer
 import kotlinx.coroutines.delay
@@ -321,6 +324,7 @@ enum class HandMode {
 fun MidiPlayerScreen(
     midiFile: MidiFile,
     repository: MidiFileRepository,
+    performanceRepository: PerformanceRepository, // Add this line
     onBackPressed: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -352,6 +356,7 @@ fun MidiPlayerScreen(
     val currentMetronomeBeat by metronomeManager.currentBeat.collectAsState()
     val isMetronomeRunning by metronomeManager.isRunning.collectAsState()
     var metronomeBeatCount by remember { mutableStateOf(4) }
+    var sessionStartTimeMs by remember { mutableStateOf(0L) }
 
     val view = LocalView.current
     DisposableEffect(isPlaybackActive) {
@@ -513,6 +518,8 @@ fun MidiPlayerScreen(
 
                     val paddedMin = (minNote - 2).coerceAtLeast(21)
                     val paddedMax = (maxNote + 2).coerceAtMost(108)
+
+                    sessionStartTimeMs = System.currentTimeMillis()
 
                     // Calculate key width based on available screen width
                     val whiteKeyCount = (paddedMin..paddedMax).count { isWhiteKey(it) }
@@ -807,14 +814,38 @@ fun MidiPlayerScreen(
                 )
 
                 if (showScoreDialog) {
+                    val sessionDurationMs = System.currentTimeMillis() - sessionStartTimeMs
                     Dialog(
                         onDismissRequest = {
+                            // Save performance data
+                            val performanceRecord = PerformanceRecord(
+                                midiFilePath = midiFile.path,
+                                midiFileName = midiFile.name,
+                                timestamp = System.currentTimeMillis(),
+                                score = score.value,
+                                notesHit = correctlyPlayedNotes.value.size,
+                                notesMissed = totalNotesInSong - correctlyPlayedNotes.value.size,
+                                totalNotes = totalNotesInSong,
+                                bpm = currentBpm ?: 120,
+                                handMode = currentHandMode,
+                                durationMs = sessionDurationMs,
+                                notesPlayed = processedNotes.value.mapIndexed { index, note ->
+                                    PlayedNote(
+                                        noteValue = note.note,
+                                        wasCorrect = note.note in correctlyPlayedNotes.value,
+                                        timestamp = System.currentTimeMillis() - (processedNotes.value.size - index) * 100L, // Approximate relative timing
+                                        isLeftHand = note.isLeftHand
+                                    )
+                                }.take(200) // Limit to 200 notes to keep size reasonable
+                            )
+
+                            scope.launch {
+                                // Save the record asynchronously
+                                performanceRepository.savePerformanceRecord(performanceRecord)
+                            }
+
                             showScoreDialog = false
-                            // Reset states for potential replay
-                            correctlyPlayedNotes.value = emptySet()
-                            missedNotes.value = emptySet()
-                            processedNotes.value = emptySet()
-                            totalNotesPlayed = 0
+                            // Existing reset states...
                         }
                     ) {
                         Surface(
