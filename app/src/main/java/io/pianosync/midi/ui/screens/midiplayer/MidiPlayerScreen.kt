@@ -622,6 +622,7 @@ fun MidiPlayerScreen(
                     .background(Color(0xFF1A1A1A))
             ) {
                 if (showTopBar) { // Only render the TopAppBar when visible
+                    // Replace the CenterAlignedTopAppBar section in MidiPlayerScreen.kt
                     CenterAlignedTopAppBar(
                         modifier = Modifier
                             .graphicsLayer {
@@ -637,65 +638,59 @@ fun MidiPlayerScreen(
                             )
                         },
                         navigationIcon = {
-                            IconButton(
-                                onClick = {
-                                    scope.launch {
-                                        // Check if we have a recording to save
-                                        if (isRecording || recordingManager.hasRecordedEvents()) {
-                                            Log.d("MidiPlayer", "Saving recording before navigation back...")
-
-                                            // Stop recording if still active
-                                            if (isRecording) {
-                                                recordingManager.stopRecording()
-                                                isRecording = false
-                                                Log.d("MidiPlayer", "Stopped recording - navigation back")
-                                            }
-
-                                            // Create and save the recording (events are still available)
-                                            val recording = recordingManager.createRecording(
-                                                originalMidiFilePath = midiFile.path,
-                                                originalMidiFileName = midiFile.name,
-                                                bpm = currentBpm ?: 120,
-                                                handMode = currentHandMode,
-                                                score = null // No score since we're leaving early
-                                            )
-
-                                            recording?.let { rec ->
-                                                Log.d("MidiPlayer", "Created recording with ${rec.recordedEvents.size} events for navigation back")
-                                                try {
-                                                    recordingRepository.saveRecording(rec)
-                                                    Log.d("MidiPlayer", "MIDI recording saved successfully on navigation back with ${rec.recordedEvents.size} events")
-
-                                                    // Verify it was saved
-                                                    val allRecordings = recordingRepository.allRecordings.first()
-                                                    Log.d("MidiPlayer", "Total recordings in repository after navigation back: ${allRecordings.size}")
-
-                                                } catch (e: Exception) {
-                                                    Log.e("MidiPlayer", "Failed to save recording on navigation back", e)
-                                                }
-                                            } ?: Log.d("MidiPlayer", "No recording created - no events available")
-                                        }
-
-                                        playbackManager.cleanup()
-                                        onBackPressed()
-                                    }
-                                }
-                            ) {
-                                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                            }
-                        },
-                        actions = {
+                            // Left side icons
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .height(48.dp)
-                                    .pointerInput(Unit) {
-                                        detectTapGestures {
-                                            lastInteractionTime = System.currentTimeMillis()
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            // Check if we have a recording to save
+                                            if (isRecording || recordingManager.hasRecordedEvents()) {
+                                                Log.d("MidiPlayer", "Saving recording before navigation back...")
+
+                                                // Stop recording if still active
+                                                if (isRecording) {
+                                                    recordingManager.stopRecording()
+                                                    isRecording = false
+                                                    Log.d("MidiPlayer", "Stopped recording - navigation back")
+                                                }
+
+                                                // Create and save the recording (events are still available)
+                                                val recording = recordingManager.createRecording(
+                                                    originalMidiFilePath = midiFile.path,
+                                                    originalMidiFileName = midiFile.name,
+                                                    bpm = currentBpm ?: 120,
+                                                    handMode = currentHandMode,
+                                                    score = null // No score since we're leaving early
+                                                )
+
+                                                recording?.let { rec ->
+                                                    Log.d("MidiPlayer", "Created recording with ${rec.recordedEvents.size} events for navigation back")
+                                                    try {
+                                                        recordingRepository.saveRecording(rec)
+                                                        Log.d("MidiPlayer", "MIDI recording saved successfully on navigation back with ${rec.recordedEvents.size} events")
+
+                                                        // Verify it was saved
+                                                        val allRecordings = recordingRepository.allRecordings.first()
+                                                        Log.d("MidiPlayer", "Total recordings in repository after navigation back: ${allRecordings.size}")
+
+                                                    } catch (e: Exception) {
+                                                        Log.e("MidiPlayer", "Failed to save recording on navigation back", e)
+                                                    }
+                                                } ?: Log.d("MidiPlayer", "No recording created - no events available")
+                                            }
+
+                                            playbackManager.cleanup()
+                                            onBackPressed()
                                         }
                                     }
-                            ) {
+                                ) {
+                                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                                }
+
+                                // Hand mode selector
                                 Box {
                                     var handMenuExpanded by remember { mutableStateOf(false) }
 
@@ -714,16 +709,16 @@ fun MidiPlayerScreen(
                                                 HandMode.RIGHT_HAND_ONLY -> Icons.Default.SwipeRight
                                             },
                                             contentDescription = "Hand Mode",
-                                            modifier = Modifier.size(24.dp)
+                                            modifier = Modifier.size(20.dp)
                                         )
-                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Spacer(modifier = Modifier.width(2.dp))
                                         Text(
                                             text = when (currentHandMode) {
                                                 HandMode.BOTH_HANDS -> "Both"
                                                 HandMode.LEFT_HAND_ONLY -> "Left"
                                                 HandMode.RIGHT_HAND_ONLY -> "Right"
                                             },
-                                            style = MaterialTheme.typography.labelMedium
+                                            style = MaterialTheme.typography.labelSmall
                                         )
                                     }
 
@@ -782,6 +777,42 @@ fun MidiPlayerScreen(
                                     }
                                 }
 
+                                // BPM button
+                                TextButton(
+                                    onClick = {
+                                        lastInteractionTime = System.currentTimeMillis()
+                                        showBpmDialog = true
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp),
+                                    modifier = Modifier.height(40.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Speed,
+                                        contentDescription = "BPM",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Text(
+                                        "${currentBpm ?: 0}",
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        },
+                        actions = {
+                            // Right side icons
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .height(48.dp)
+                                    .pointerInput(Unit) {
+                                        detectTapGestures {
+                                            lastInteractionTime = System.currentTimeMillis()
+                                        }
+                                    }
+                            ) {
+                                // Recording button
                                 IconButton(
                                     onClick = {
                                         lastInteractionTime = System.currentTimeMillis()
@@ -812,6 +843,7 @@ fun MidiPlayerScreen(
                                     )
                                 }
 
+                                // Metronome button
                                 TextButton(
                                     onClick = {
                                         lastInteractionTime = System.currentTimeMillis()
@@ -831,31 +863,12 @@ fun MidiPlayerScreen(
                                     Icon(
                                         Icons.Default.Timer,
                                         contentDescription = "Metronome",
-                                        modifier = Modifier.size(24.dp),
+                                        modifier = Modifier.size(20.dp),
                                         tint = if (metronomeEnabled) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.6f)
                                     )
                                 }
 
-                                TextButton(
-                                    onClick = {
-                                        lastInteractionTime = System.currentTimeMillis()
-                                        showBpmDialog = true
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 8.dp),
-                                    modifier = Modifier.height(40.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Speed,
-                                        contentDescription = "BPM",
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        "${currentBpm ?: 0}",
-                                        style = MaterialTheme.typography.labelMedium
-                                    )
-                                }
-
+                                // Restart button
                                 IconButton(
                                     onClick = {
                                         scope.launch {
@@ -1443,59 +1456,71 @@ fun MidiPlayerScreen(
                     }
                 }
 
+                // Replace the LoopControl Box section in MidiPlayerScreen.kt
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .graphicsLayer {
-                            // Fade in/out with the same alpha as the top bar
-                            alpha = if (showTopBar) 1f else 0f
-                        }
-                        // When hidden (alpha=0), block all pointer input events
-                        .pointerInput(showTopBar) {
-                            if (!showTopBar) {
-                                awaitPointerEventScope {
-                                    while (true) {
-                                        awaitPointerEvent()
+                        .then(
+                            if (showTopBar) {
+                                Modifier
+                                    .graphicsLayer { alpha = 1f }
+                                    .pointerInput(Unit) {
+                                        // Allow interactions when visible
+                                        detectTapGestures { }
                                     }
-                                }
+                            } else {
+                                Modifier
+                                    .graphicsLayer { alpha = 0f }
+                                    .pointerInput(Unit) {
+                                        // Block ALL interactions when hidden
+                                        awaitPointerEventScope {
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                // Consume the event to prevent it from reaching child components
+                                                event.changes.forEach { it.consume() }
+                                            }
+                                        }
+                                    }
                             }
-                        }
+                        )
                 ) {
-                    LoopControl(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        isLoopEnabled = isLoopEnabled,
-                        loopStartMs = loopStartMs,
-                        loopEndMs = loopEndMs,
-                        songDurationMs = songDurationMs,
-                        currentTimeMs = currentTimeMs,
-                        onLoopToggled = { enabled ->
-                            lastInteractionTime = System.currentTimeMillis() // Reset timer on interaction
-                            playbackManager.toggleLoopMode(enabled)
-                        },
-                        onSetLoopStart = {
-                            lastInteractionTime = System.currentTimeMillis() // Reset timer on interaction
-                            Log.d("MidiPlayer", "Setting loop start to current time: $currentTimeMs")
-                            val endPoint = if (loopEndMs <= currentTimeMs) songDurationMs else loopEndMs
-                            playbackManager.setLoopPoints(currentTimeMs, endPoint)
-                            playbackManager.toggleLoopMode(true)
-                        },
-                        onSetLoopEnd = {
-                            lastInteractionTime = System.currentTimeMillis() // Reset timer on interaction
-                            // Only set end if it's after start
-                            if (currentTimeMs > loopStartMs) {
-                                Log.d("MidiPlayer", "Setting loop end to current time: $currentTimeMs")
-                                playbackManager.setLoopPoints(loopStartMs, currentTimeMs)
+                    if (showTopBar) { // Only render when visible to save performance
+                        LoopControl(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            isLoopEnabled = isLoopEnabled,
+                            loopStartMs = loopStartMs,
+                            loopEndMs = loopEndMs,
+                            songDurationMs = songDurationMs,
+                            currentTimeMs = currentTimeMs,
+                            onLoopToggled = { enabled ->
+                                lastInteractionTime = System.currentTimeMillis() // Reset timer on interaction
+                                playbackManager.toggleLoopMode(enabled)
+                            },
+                            onSetLoopStart = {
+                                lastInteractionTime = System.currentTimeMillis() // Reset timer on interaction
+                                Log.d("MidiPlayer", "Setting loop start to current time: $currentTimeMs")
+                                val endPoint = if (loopEndMs <= currentTimeMs) songDurationMs else loopEndMs
+                                playbackManager.setLoopPoints(currentTimeMs, endPoint)
                                 playbackManager.toggleLoopMode(true)
+                            },
+                            onSetLoopEnd = {
+                                lastInteractionTime = System.currentTimeMillis() // Reset timer on interaction
+                                // Only set end if it's after start
+                                if (currentTimeMs > loopStartMs) {
+                                    Log.d("MidiPlayer", "Setting loop end to current time: $currentTimeMs")
+                                    playbackManager.setLoopPoints(loopStartMs, currentTimeMs)
+                                    playbackManager.toggleLoopMode(true)
+                                }
+                            },
+                            onSeekTo = { position ->
+                                lastInteractionTime = System.currentTimeMillis() // Reset timer on interaction
+                                Log.d("MidiPlayer", "Seeking to position: $position")
+                                playbackManager.seekTo(position)
                             }
-                        },
-                        onSeekTo = { position ->
-                            lastInteractionTime = System.currentTimeMillis() // Reset timer on interaction
-                            Log.d("MidiPlayer", "Seeking to position: $position")
-                            playbackManager.seekTo(position)
-                        }
-                    )
+                        )
+                    }
                 }
 
                 PianoLayout(
