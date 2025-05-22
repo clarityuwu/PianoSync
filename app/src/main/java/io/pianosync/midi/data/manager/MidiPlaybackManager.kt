@@ -58,6 +58,19 @@ class MidiPlaybackManager(
     private var currentAllMidiNotes: List<MidiNote> = emptyList()
     private var currentHandMode: HandMode = HandMode.BOTH_HANDS
 
+    private fun adjustNotesForBpmChange(notes: List<MidiNote>, originalBpm: Int, targetBpm: Int): List<MidiNote> {
+        if (originalBpm == targetBpm) return notes
+
+        val timeRatio = originalBpm.toDouble() / targetBpm.toDouble()
+
+        return notes.map { note ->
+            note.copy(
+                startTime = (note.startTime * timeRatio).toLong(),
+                duration = (note.duration * timeRatio).toLong()
+            )
+        }
+    }
+
     fun processNoteAtPlayLine(note: MidiNote, currentTime: Long) {
         if (!_isPlaying.value || note in playedNotes) return
 
@@ -83,69 +96,92 @@ class MidiPlaybackManager(
         _isLoopEnabled.value = enabled
     }
 
-    // Modified startPlayback to accept all parsed notes and the hand mode
     fun startPlayback(
         midiFile: MidiFile,
         bpm: Int,
         offset: Long = 0L,
-        allMidiNotes: List<MidiNote>, // The full list of parsed MidiNotes
-        handMode: HandMode // The selected hand mode
+        allMidiNotes: List<MidiNote>,
+        handMode: HandMode
     ) {
         try {
             // Store these for potential looping
             currentMidiFile = midiFile
-            currentAllMidiNotes = allMidiNotes
             currentHandMode = handMode
 
             // Stop any existing playback and clean up previous temp file
             stopPlayback()
-            deleteTempFile() // Ensure any old temp file is removed
+            deleteTempFile()
 
             // Set BPM and calculate playback speed
             currentBpm = bpm
             originalBpm = midiFile.originalBpm ?: 120
-            val bpmRatio = currentBpm.toFloat() / originalBpm.toFloat()
-            playbackSpeed = when {
-                bpmRatio > 2.0f -> 2.0f
-                bpmRatio < 0.5f -> 0.5f
-                else -> bpmRatio
-            }
 
             val uriToPlay: Uri
+            val notesToUse: List<MidiNote>
+
             if (handMode == HandMode.BOTH_HANDS) {
-                // If playing both hands, use the original file path
+                // Use original file and original notes
                 uriToPlay = Uri.parse(midiFile.path)
-                tempMidiFileUri = null // No temp file needed
+                tempMidiFileUri = null
+                notesToUse = allMidiNotes
+
+                // Calculate playback speed for original file
+                val bpmRatio = currentBpm.toFloat() / originalBpm.toFloat()
+                playbackSpeed = when {
+                    bpmRatio > 2.0f -> 2.0f
+                    bpmRatio < 0.5f -> 0.5f
+                    else -> bpmRatio
+                }
             } else {
-                // Otherwise, generate a temporary MIDI file with filtered notes
+                // For filtered playback, create temp file with CURRENT BPM (not original)
+                // This ensures audio and visual timing stay consistent
+
+                val filteredNotes = when (handMode) {
+                    HandMode.LEFT_HAND_ONLY -> allMidiNotes.filter { it.isLeftHand }
+                    HandMode.RIGHT_HAND_ONLY -> allMidiNotes.filter { !it.isLeftHand }
+                    HandMode.BOTH_HANDS -> allMidiNotes
+                }
+
+                // Write the MIDI file using the CURRENT BPM, not original BPM
                 tempMidiFileUri = MidiWriter.writeFilteredMidiFile(
                     context,
-                    allMidiNotes,
-                    originalBpm, // Pass original BPM for tick calculation
+                    filteredNotes,
+                    currentBpm, // Use current BPM instead of original BPM
                     handMode
                 )
                 uriToPlay = tempMidiFileUri!!
-                Log.d("MidiPlayback", "Generated temporary MIDI file: $uriToPlay for hand mode: $handMode")
+
+                // Adjust the notes timing to match the current BPM for visual sync
+                notesToUse = adjustNotesForBpmChange(filteredNotes, originalBpm, currentBpm)
+
+                // No additional playback speed needed since file is already at correct BPM
+                playbackSpeed = 1.0f
+
+                Log.d("MidiPlayback", "Generated temporary MIDI file at ${currentBpm} BPM for hand mode: $handMode")
             }
+
+            // Store the adjusted notes for visual sync
+            currentAllMidiNotes = notesToUse
 
             // Initialize MediaPlayer
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(context, uriToPlay)
                 prepare()
+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     setPlaybackParams(PlaybackParams().apply {
                         speed = playbackSpeed
                         pitch = 1.0f
                     })
                 }
+
                 seekTo(offset.toInt())
                 setOnCompletionListener {
                     if (_isLoopEnabled.value) {
-                        // If looping is enabled, jump back to loop start point
                         seekToLoopStart()
                     } else {
                         stopPlayback()
-                        deleteTempFile() // Delete temp file on completion
+                        deleteTempFile()
                         onPlaybackCompletedCallback?.invoke()
                     }
                 }
@@ -153,7 +189,7 @@ class MidiPlaybackManager(
                     Log.e("MidiPlayback", "MediaPlayer error: $what, $extra")
                     _playbackError.value = "Error playing audio"
                     stopPlayback()
-                    deleteTempFile() // Delete temp file on error
+                    deleteTempFile()
                     true
                 }
             }
@@ -168,7 +204,6 @@ class MidiPlaybackManager(
             playbackJob = coroutineScope.launch {
                 while (isActive && _isPlaying.value) {
                     val now = System.currentTimeMillis()
-                    // Adjust elapsed time by playback speed for accurate current time
                     val elapsedRealTime = now - startRealTime
                     _currentTimeMs.value = offset + (elapsedRealTime * playbackSpeed).toLong()
 
@@ -177,13 +212,13 @@ class MidiPlaybackManager(
                         seekToLoopStart()
                     }
 
-                    delay(8) // Update roughly 60 times per second
+                    delay(8)
                 }
             }
         } catch (e: Exception) {
             _playbackError.value = "Error playing MIDI file: ${e.message}"
             Log.e("MidiPlayback", "Error starting playback", e)
-            deleteTempFile() // Ensure temp file is cleaned up on error
+            deleteTempFile()
         }
     }
 

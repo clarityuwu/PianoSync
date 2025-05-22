@@ -75,7 +75,7 @@ object MidiWriter {
     fun writeFilteredMidiFile(
         context: Context,
         notes: List<MidiNote>,
-        originalBpm: Int,
+        targetBpm: Int, // This is now the target BPM, not necessarily original
         handMode: HandMode
     ): Uri {
         val filteredNotes = when (handMode) {
@@ -94,7 +94,7 @@ object MidiWriter {
                 fos.write(byteArrayOf(0x00, 0x00, 0x00, 0x06)) // Length (6 bytes)
                 fos.write(byteArrayOf(0x00, 0x00))             // Format (Type 0: single track)
                 fos.write(byteArrayOf(0x00, 0x01))             // Number of tracks (1 for Type 0)
-                val ticksPerQuarterNote: Short = 120           // Example: 120 TPQN
+                val ticksPerQuarterNote: Short = 480           // Higher resolution for better timing
                 fos.write(ticksPerQuarterNote.toBigEndianByteArray(2)) // Division
 
                 // --- MIDI Track Chunk (MTrk) ---
@@ -104,44 +104,52 @@ object MidiWriter {
                 fos.write(byteArrayOf(0x00, 0x00, 0x00, 0x00)) // Placeholder for track length
 
                 var currentMidiTickTime = 0L
-                val ticksPerMs = ticksPerQuarterNote / (60000.0 / originalBpm)
 
-                val microSecsPerQuarterNote = (60000000 / originalBpm)
+                // Use the target BPM for timing calculations
+                val ticksPerMs = ticksPerQuarterNote / (60000.0 / targetBpm)
+
+                // Set tempo meta event using target BPM
+                val microSecsPerQuarterNote = (60000000 / targetBpm)
                 writeVariableLengthValue(fos, 0)
                 fos.write(0xFF)
                 fos.write(0x51)
                 fos.write(0x03)
-                // Corrected use of Int.toBigEndianByteArray
                 val tempoBytes = microSecsPerQuarterNote.toBigEndianByteArray(4)
                 fos.write(tempoBytes, 1, 3) // Write 3 MSBs of the 4-byte array
 
-                for (note in sortedNotes) {
-                    val noteStartTick = (note.startTime * ticksPerMs).roundToLong()
-                    val noteEndTick = ((note.startTime + note.duration) * ticksPerMs).roundToLong()
+                // Convert notes to MIDI events
+                val midiEvents = mutableListOf<Pair<Long, ByteArray>>()
 
-                    val deltaTicksOn = (noteStartTick - currentMidiTickTime).coerceAtLeast(0)
-                    writeVariableLengthValue(fos, deltaTicksOn)
-                    fos.write(0x90)
-                    fos.write(note.note)
-                    fos.write(note.velocity)
-                    currentMidiTickTime = noteStartTick
+                sortedNotes.forEach { note ->
+                    val noteStartTick = (note.startTime * ticksPerMs).toLong().coerceAtLeast(0)
+                    val noteEndTick = ((note.startTime + note.duration) * ticksPerMs).toLong().coerceAtLeast(noteStartTick + 1)
 
-                    val deltaTicksOff = (noteEndTick - currentMidiTickTime).coerceAtLeast(0)
-                    writeVariableLengthValue(fos, deltaTicksOff)
-                    fos.write(0x80)
-                    fos.write(note.note)
-                    fos.write(0x00)
-                    currentMidiTickTime = noteEndTick
+                    // Note on event
+                    midiEvents.add(noteStartTick to byteArrayOf(0x90.toByte(), note.note.toByte(), note.velocity.toByte()))
+                    // Note off event
+                    midiEvents.add(noteEndTick to byteArrayOf(0x80.toByte(), note.note.toByte(), 0x00))
                 }
 
+                // Sort events by tick time
+                midiEvents.sortBy { it.first }
+
+                // Write MIDI events with proper delta times
+                midiEvents.forEach { (tick, eventData) ->
+                    val deltaTime = (tick - currentMidiTickTime).coerceAtLeast(0)
+                    writeVariableLengthValue(fos, deltaTime)
+                    fos.write(eventData)
+                    currentMidiTickTime = tick
+                }
+
+                // End of track
                 writeVariableLengthValue(fos, 0)
                 fos.write(0xFF)
                 fos.write(0x2F)
                 fos.write(0x00)
 
+                // Write track length
                 val trackLength = fos.channel.position() - trackLengthPos - 4
                 fos.channel.position(trackLengthPos)
-                // Corrected use of Int.toBigEndianByteArray
                 fos.write(trackLength.toInt().toBigEndianByteArray(4))
                 fos.channel.position(trackChunkStartPos + 8 + trackLength)
             }
@@ -150,6 +158,8 @@ object MidiWriter {
             if (tempFile.exists()) tempFile.delete()
             throw e
         }
+
+        Log.d("MidiWriter", "Created filtered MIDI file with ${sortedNotes.size} notes at ${targetBpm} BPM")
         return Uri.fromFile(tempFile)
     }
 }
