@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Piano
 import androidx.compose.material.icons.filled.PianoOff
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ import kotlinx.coroutines.launch
 fun HomeScreen(
     onNavigateToPlayer: (MidiFile) -> Unit,
     onNavigateToProgress: () -> Unit, // Add this parameter
+    onNavigateToSettings: () -> Unit, // Add this parameter
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -124,8 +126,7 @@ fun HomeScreen(
 
                         // Add Progress button
                         IconButton(
-                            onClick = onNavigateToProgress,
-                            modifier = Modifier.padding(end = 8.dp)
+                            onClick = onNavigateToProgress
                         ) {
                             Icon(
                                 imageVector = Icons.Default.BarChart,
@@ -134,10 +135,22 @@ fun HomeScreen(
                             )
                         }
 
+                        // Add Settings button
+                        IconButton(
+                            onClick = onNavigateToSettings
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
                         Icon(
                             imageVector = if (effectivelyConnected) Icons.Default.Piano else Icons.Default.PianoOff,
                             contentDescription = if (effectivelyConnected) "Piano Connected" else "Piano Disconnected",
-                            tint = if (effectivelyConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                            tint = if (effectivelyConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(start = 8.dp)
                         )
                     }
                 }

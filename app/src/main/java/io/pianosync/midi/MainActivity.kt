@@ -26,6 +26,7 @@ import io.pianosync.midi.data.repository.PerformanceRepository
 import io.pianosync.midi.ui.screens.home.HomeScreen
 import io.pianosync.midi.ui.screens.player.MidiPlayerScreen
 import io.pianosync.midi.ui.screens.progress.ProgressTrackingScreen
+import io.pianosync.midi.ui.screens.settings.SettingsScreen
 import io.pianosync.midi.ui.theme.PianoSyncTheme
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -77,6 +78,9 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onNavigateToProgress = {
                                     navController.navigate("progress")
+                                },
+                                onNavigateToSettings = {
+                                    navController.navigate("settings")
                                 }
                             )
                         }
@@ -87,6 +91,15 @@ class MainActivity : ComponentActivity() {
                                 midiFileRepository = repository,
                                 performanceRepository = performanceRepository,
                                 recordingRepository = recordingRepository,
+                                onBackPressed = {
+                                    navController.popBackStack()
+                                }
+                            )
+                        }
+
+                        // Add Settings screen route
+                        composable("settings") {
+                            SettingsScreen(
                                 onBackPressed = {
                                     navController.popBackStack()
                                 }

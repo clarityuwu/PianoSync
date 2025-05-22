@@ -32,6 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -45,6 +46,8 @@ import io.pianosync.midi.data.parser.MidiParser
 import io.pianosync.midi.data.repository.MidiFileRepository
 import io.pianosync.midi.data.repository.MidiRecordingRepository
 import io.pianosync.midi.data.repository.PerformanceRepository
+import io.pianosync.midi.data.repository.SettingsRepository
+import io.pianosync.midi.data.model.AppSettings
 import io.pianosync.midi.ui.screens.player.components.LoopControl
 import io.pianosync.midi.ui.screens.player.components.MetronomeVisualizer
 import kotlinx.coroutines.delay
@@ -52,6 +55,26 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
+
+/**
+ * Get the note name for a MIDI note number
+ */
+fun getNoteNameForMidiNote(midiNote: Int): String {
+    val noteNames = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+    val octave = (midiNote / 12) - 1
+    val noteIndex = midiNote % 12
+    return "${noteNames[noteIndex]}$octave"
+}
+
+/**
+ * Check if a MIDI note is a white key
+ */
+fun isWhiteKey(note: Int): Boolean {
+    return when (note % 12) {
+        0, 2, 4, 5, 7, 9, 11 -> true // C, D, E, F, G, A, B
+        else -> false
+    }
+}
 
 fun calculateNotePosition(
     note: Int,
@@ -82,18 +105,15 @@ fun NoteFallVisualizer(
     playbackManager: MidiPlaybackManager,
     correctlyPlayedNotes: MutableState<Set<Int>>,
     pressedKeys: Set<Int>,
+    settings: AppSettings,
     onNoteProcessed: () -> Unit
 ) {
     // Get device configuration
     val configuration = LocalConfiguration.current
 
-    // Determine if device is a tablet based on the smallest dimension
-    // Common tablet threshold is 600dp for the smallest dimension
-    val isTablet = minOf(configuration.screenWidthDp, configuration.screenHeightDp) >= 600
-
-    // Fixed offset to compensate for the playback delay - different for phone and tablet
-    val PLAYBACK_OFFSET_MS = if (isTablet) 2000L else 4500L  // 2 seconds for tablets, 4.5 seconds for phones
-    val CORRECT_NOTE_WINDOW = 300L
+    // Use settings for timing values
+    val PLAYBACK_OFFSET_MS = settings.playbackOffsetMs
+    val CORRECT_NOTE_WINDOW = settings.difficultyLevel.correctNoteWindowMs
 
     val noteHeight = 16.dp
     val futureTimeWindow = 8000L
@@ -225,7 +245,6 @@ fun NoteFallVisualizer(
         }
     }
 
-
     Box(
         modifier = modifier
             .background(Color(0xFF1A1A1A))
@@ -337,13 +356,16 @@ fun MidiPlayerScreen(
     onBackPressed: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val settingsRepository = remember { SettingsRepository(context) }
+    val settings by settingsRepository.settings.collectAsState(initial = AppSettings())
+
     var showTopBar by remember { mutableStateOf(true) }
     var lastInteractionTime by remember { mutableStateOf(System.currentTimeMillis()) }
     var countdownSeconds by remember { mutableStateOf(3) }
     var showCountdown by remember { mutableStateOf(true) }
     val screenWidth = LocalConfiguration.current.screenWidthDp
     val horizontalPadding = 16 // Total horizontal padding
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var currentBpm by remember { mutableStateOf(midiFile.currentBpm) }
     var showBpmDialog by remember { mutableStateOf(false) }
@@ -535,9 +557,9 @@ fun MidiPlayerScreen(
         metronomeManager.updateBpm(currentBpm ?: 120)
     }
 
-    LaunchedEffect(isPlaybackActive, metronomeEnabled) {
+    LaunchedEffect(isPlaybackActive, metronomeEnabled, settings.metronomeVolume) {
         if (isPlaybackActive && metronomeEnabled) {
-            metronomeManager.start(currentBpm ?: 120, metronomeBeatCount)
+            metronomeManager.start(currentBpm ?: 120, metronomeBeatCount, volume = settings.metronomeVolume)
         } else if (!isPlaybackActive && isMetronomeRunning) {
             metronomeManager.stop()
         }
@@ -629,7 +651,6 @@ fun MidiPlayerScreen(
                     .background(Color(0xFF1A1A1A))
             ) {
                 if (showTopBar) { // Only render the TopAppBar when visible
-                    // Replace the CenterAlignedTopAppBar section in MidiPlayerScreen.kt
                     CenterAlignedTopAppBar(
                         modifier = Modifier
                             .graphicsLayer {
@@ -804,6 +825,24 @@ fun MidiPlayerScreen(
                                         style = MaterialTheme.typography.labelSmall
                                     )
                                 }
+
+                                // Difficulty indicator
+                                Surface(
+                                    color = when(settings.difficultyLevel) {
+                                        io.pianosync.midi.data.model.DifficultyLevel.EASY -> Color(0xFF4CAF50)
+                                        io.pianosync.midi.data.model.DifficultyLevel.MEDIUM -> Color(0xFFFF9800)
+                                        io.pianosync.midi.data.model.DifficultyLevel.HARD -> Color(0xFFF44336)
+                                        io.pianosync.midi.data.model.DifficultyLevel.EXPERT -> Color(0xFF9C27B0)
+                                    },
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        text = settings.difficultyLevel.displayName,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                                    )
+                                }
                             }
                         },
                         actions = {
@@ -858,7 +897,7 @@ fun MidiPlayerScreen(
 
                                         if (metronomeEnabled) {
                                             if (isPlaybackActive) {
-                                                metronomeManager.start(currentBpm ?: 120, metronomeBeatCount)
+                                                metronomeManager.start(currentBpm ?: 120, metronomeBeatCount, volume = settings.metronomeVolume)
                                             }
                                         } else {
                                             metronomeManager.stop()
@@ -974,6 +1013,7 @@ fun MidiPlayerScreen(
                     playbackManager = playbackManager,
                     correctlyPlayedNotes = correctlyPlayedNotes,
                     pressedKeys = pressedKeys,
+                    settings = settings, // Pass settings to visualizer
                     onNoteProcessed = {
                         // Make sure we're tracking processed notes
                         totalNotesPlayed++
@@ -1533,7 +1573,7 @@ fun MidiPlayerScreen(
                     }
                 }
 
-                PianoLayout(
+                EnhancedPianoLayout(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
@@ -1542,6 +1582,7 @@ fun MidiPlayerScreen(
                     pressedKeys = pressedKeys,
                     currentNotes = activeNotes,
                     syncedNotes = emptySet(),
+                    showKeyNames = settings.difficultyLevel.showKeyNames && settings.showKeyNames,
                     onNotePressed = { /* Optional: handle virtual key presses */ }
                 )
             }
@@ -1612,20 +1653,14 @@ data class MidiNote(
     val velocity: Int = 64  // Changed from Velocity to Int for better MIDI compatibility
 )
 
-private fun isWhiteKey(note: Int): Boolean {
-    return when (note % 12) {
-        0, 2, 4, 5, 7, 9, 11 -> true // C, D, E, F, G, A, B
-        else -> false
-    }
-}
-
 @Composable
-fun PianoLayout(
+fun EnhancedPianoLayout(
     modifier: Modifier = Modifier,
     pianoConfig: PianoConfiguration,
     pressedKeys: Set<Int>,
     currentNotes: List<MidiNote>,
     syncedNotes: Set<Int>,
+    showKeyNames: Boolean = false,
     onNotePressed: (Int) -> Unit
 ) {
     val totalWhiteKeys = (pianoConfig.minNote..pianoConfig.maxNote)
@@ -1647,12 +1682,12 @@ fun PianoLayout(
         ) {
             (pianoConfig.minNote..pianoConfig.maxNote).forEach { note ->
                 if (isWhiteKey(note)) {
-                    val xPos = calculateNotePosition(note, pianoConfig.minNote, pianoConfig.keyWidth, false)
-                    WhiteKey(
+                    EnhancedWhiteKey(
                         modifier = Modifier.width(pianoConfig.keyWidth.dp),
                         note = note,
                         isPhysicallyPressed = note in pressedKeys,
                         isHighlighted = currentNotes.any { it.note == note && note in pressedKeys },
+                        showKeyName = showKeyNames,
                         onPressed = onNotePressed
                     )
                 }
@@ -1664,11 +1699,12 @@ fun PianoLayout(
             (pianoConfig.minNote..pianoConfig.maxNote).forEach { note ->
                 if (!isWhiteKey(note)) {
                     val xPos = calculateNotePosition(note, pianoConfig.minNote, pianoConfig.keyWidth, true)
-                    BlackKey(
+                    EnhancedBlackKey(
                         modifier = Modifier.offset(x = xPos.dp),
                         note = note,
                         isPhysicallyPressed = note in pressedKeys,
                         isHighlighted = currentNotes.any { it.note == note && note in pressedKeys },
+                        showKeyName = showKeyNames,
                         onPressed = onNotePressed
                     )
                 }
@@ -1678,11 +1714,12 @@ fun PianoLayout(
 }
 
 @Composable
-fun WhiteKey(
+fun EnhancedWhiteKey(
     modifier: Modifier = Modifier,
     note: Int,
     isPhysicallyPressed: Boolean = false,
     isHighlighted: Boolean = false,
+    showKeyName: Boolean = false,
     onPressed: (Int) -> Unit
 ) {
     var isVirtuallyPressed by remember { mutableStateOf(false) }
@@ -1729,16 +1766,29 @@ fun WhiteKey(
                         isVirtuallyPressed = false
                     }
                 )
-            }
-    )
+            },
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        if (showKeyName) {
+            Text(
+                text = getNoteNameForMidiNote(note),
+                fontSize = 10.sp,
+                color = Color.Black.copy(alpha = 0.7f),
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+        }
+    }
 }
 
 @Composable
-fun BlackKey(
+fun EnhancedBlackKey(
     modifier: Modifier = Modifier,
     note: Int,
     isPhysicallyPressed: Boolean = false,
     isHighlighted: Boolean = false,
+    showKeyName: Boolean = false,
     onPressed: (Int) -> Unit
 ) {
     var isVirtuallyPressed by remember { mutableStateOf(false) }
@@ -1785,6 +1835,18 @@ fun BlackKey(
                         isVirtuallyPressed = false
                     }
                 )
-            }
-    )
+            },
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        if (showKeyName) {
+            Text(
+                text = getNoteNameForMidiNote(note),
+                fontSize = 8.sp,
+                color = Color.White.copy(alpha = 0.9f),
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
+    }
 }
