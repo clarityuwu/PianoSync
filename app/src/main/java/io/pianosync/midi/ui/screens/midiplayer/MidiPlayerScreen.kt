@@ -43,10 +43,12 @@ import io.pianosync.midi.data.model.PerformanceRecord
 import io.pianosync.midi.data.model.PlayedNote
 import io.pianosync.midi.data.parser.MidiParser
 import io.pianosync.midi.data.repository.MidiFileRepository
+import io.pianosync.midi.data.repository.MidiRecordingRepository
 import io.pianosync.midi.data.repository.PerformanceRepository
 import io.pianosync.midi.ui.screens.player.components.LoopControl
 import io.pianosync.midi.ui.screens.player.components.MetronomeVisualizer
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
@@ -319,12 +321,19 @@ enum class HandMode {
     RIGHT_HAND_ONLY
 }
 
+private fun formatRecordingTime(durationMs: Long): String {
+    val seconds = (durationMs / 1000) % 60
+    val minutes = (durationMs / (1000 * 60)) % 60
+    return String.format("%02d:%02d", minutes, seconds)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MidiPlayerScreen(
     midiFile: MidiFile,
     repository: MidiFileRepository,
-    performanceRepository: PerformanceRepository, // Add this line
+    performanceRepository: PerformanceRepository,
+    recordingRepository: MidiRecordingRepository, // This is passed from MainActivity
     onBackPressed: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -357,6 +366,12 @@ fun MidiPlayerScreen(
     val isMetronomeRunning by metronomeManager.isRunning.collectAsState()
     var metronomeBeatCount by remember { mutableStateOf(4) }
     var sessionStartTimeMs by remember { mutableStateOf(0L) }
+    var isSavingPerformance by remember { mutableStateOf(false) }
+    var isRecording by remember { mutableStateOf(false) }
+    val recordingManager = remember { midiConnectionManager.getRecordingManager() }
+    val recordingState by recordingManager.recordingState.collectAsState()
+    var recordingDuration by remember { mutableStateOf(0L) }
+    val isConnected by midiConnectionManager.isConnected.collectAsState()
 
     val view = LocalView.current
     DisposableEffect(isPlaybackActive) {
@@ -409,6 +424,15 @@ fun MidiPlayerScreen(
         }
     }
 
+    LaunchedEffect(isRecording) {
+        if (isRecording) {
+            while (isRecording) {
+                recordingDuration = recordingManager.getRecordingDuration()
+                delay(100) // Update every 100ms
+            }
+        }
+    }
+
     // This monitors the playback position but doesn't restart on each time update
     LaunchedEffect(Unit) {
         while (true) {
@@ -428,7 +452,6 @@ fun MidiPlayerScreen(
         }
     }
 
-// This handles the completion timer separately
     LaunchedEffect(isNearEndOfSong) {
         if (isNearEndOfSong && !endOfSongTimerStarted) {
             endOfSongTimerStarted = true
@@ -437,9 +460,17 @@ fun MidiPlayerScreen(
             // Wait for 2 seconds
             delay(2000)
 
-            // If we're still near the end, show the dialog
+            // If we're still near the end, show the dialog and stop recording
             if (isPlaybackActive) {
                 Log.d("MidiPlayer", "Song completion timer finished, showing score dialog")
+
+                // Stop recording automatically when song ends
+                if (isRecording) {
+                    recordingManager.stopRecording()
+                    isRecording = false
+                    Log.d("MidiPlayer", "Stopped recording automatically - song ended")
+                }
+
                 playbackManager.pausePlayback()
                 showScoreDialog = true
             }
@@ -450,10 +481,16 @@ fun MidiPlayerScreen(
         }
     }
 
-// Add a direct completion detection based on playback state
     LaunchedEffect(isPlaybackActive) {
         if (!isPlaybackActive && hasStartedPlaying && !isPreLoading && !showScoreDialog) {
             hasStartedPlaying = false
+
+            // Stop recording when playback stops after significant progress
+            if (isRecording) {
+                recordingManager.stopRecording()
+                isRecording = false
+                Log.d("MidiPlayer", "Stopped recording automatically - playback ended")
+            }
 
             // Check if we've played a significant portion
             val lastNoteTime = if (midiNotes.isNotEmpty()) {
@@ -476,8 +513,14 @@ fun MidiPlayerScreen(
 
     DisposableEffect(Unit) {
         onDispose {
+            // Stop recording if active when leaving the screen
+            if (isRecording) {
+                recordingManager.stopRecording()
+                Log.d("MidiPlayer", "Stopped recording - screen disposed")
+            }
+
             playbackManager.cleanup()
-            metronomeManager.cleanup() // Add this line
+            metronomeManager.cleanup()
         }
     }
 
@@ -596,8 +639,46 @@ fun MidiPlayerScreen(
                         navigationIcon = {
                             IconButton(
                                 onClick = {
-                                    playbackManager.cleanup()
-                                    onBackPressed()
+                                    scope.launch {
+                                        // Stop recording and save it if there's one
+                                        if (isRecording || recordingManager.getRecordingDuration() > 0) {
+                                            Log.d("MidiPlayer", "Saving recording before navigation back...")
+
+                                            // Stop recording if still active
+                                            if (isRecording) {
+                                                recordingManager.stopRecording()
+                                                isRecording = false
+                                                Log.d("MidiPlayer", "Stopped recording - navigation back")
+                                            }
+
+                                            // Create and save the recording
+                                            val recording = recordingManager.createRecording(
+                                                originalMidiFilePath = midiFile.path,
+                                                originalMidiFileName = midiFile.name,
+                                                bpm = currentBpm ?: 120,
+                                                handMode = currentHandMode,
+                                                score = null // No score since we're leaving early
+                                            )
+
+                                            recording?.let { rec ->
+                                                Log.d("MidiPlayer", "Created recording with ${rec.recordedEvents.size} events for navigation back")
+                                                try {
+                                                    recordingRepository.saveRecording(rec)
+                                                    Log.d("MidiPlayer", "MIDI recording saved successfully on navigation back with ${rec.recordedEvents.size} events")
+
+                                                    // Verify it was saved
+                                                    val allRecordings = recordingRepository.allRecordings.first()
+                                                    Log.d("MidiPlayer", "Total recordings in repository after navigation back: ${allRecordings.size}")
+
+                                                } catch (e: Exception) {
+                                                    Log.e("MidiPlayer", "Failed to save recording on navigation back", e)
+                                                }
+                                            } ?: Log.d("MidiPlayer", "No recording to save on navigation back")
+                                        }
+
+                                        playbackManager.cleanup()
+                                        onBackPressed()
+                                    }
                                 }
                             ) {
                                 Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -701,6 +782,36 @@ fun MidiPlayerScreen(
                                     }
                                 }
 
+                                IconButton(
+                                    onClick = {
+                                        lastInteractionTime = System.currentTimeMillis()
+                                        if (isRecording) {
+                                            // Stop recording manually
+                                            recordingManager.stopRecording()
+                                            isRecording = false
+                                            Log.d("MidiPlayer", "Stopped recording manually")
+                                        } else {
+                                            // Start recording manually (only if piano is connected)
+                                            if (isConnected) {
+                                                recordingManager.startRecording()
+                                                isRecording = true
+                                                Log.d("MidiPlayer", "Started recording manually")
+                                            }
+                                        }
+                                    },
+                                    enabled = isConnected  // Only enable if piano is connected
+                                ) {
+                                    Icon(
+                                        imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
+                                        contentDescription = if (isRecording) "Stop Recording" else "Start Recording",
+                                        tint = when {
+                                            !isConnected -> Color.Gray
+                                            isRecording -> Color.Red
+                                            else -> Color.White
+                                        }
+                                    )
+                                }
+
                                 TextButton(
                                     onClick = {
                                         lastInteractionTime = System.currentTimeMillis()
@@ -745,12 +856,45 @@ fun MidiPlayerScreen(
                                     )
                                 }
 
-                                // Restart Button
                                 IconButton(
                                     onClick = {
-                                        lastInteractionTime = System.currentTimeMillis()
-                                        playbackManager.resetPlayback()
-                                        playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
+                                        scope.launch {
+                                            lastInteractionTime = System.currentTimeMillis()
+
+                                            // Save recording before restarting if there's one
+                                            if (isRecording || recordingManager.getRecordingDuration() > 0) {
+                                                Log.d("MidiPlayer", "Saving recording before restart...")
+
+                                                // Stop recording if still active
+                                                if (isRecording) {
+                                                    recordingManager.stopRecording()
+                                                    isRecording = false
+                                                    Log.d("MidiPlayer", "Stopped recording - restart")
+                                                }
+
+                                                // Create and save the recording
+                                                val recording = recordingManager.createRecording(
+                                                    originalMidiFilePath = midiFile.path,
+                                                    originalMidiFileName = midiFile.name,
+                                                    bpm = currentBpm ?: 120,
+                                                    handMode = currentHandMode,
+                                                    score = null // No score since we're restarting
+                                                )
+
+                                                recording?.let { rec ->
+                                                    Log.d("MidiPlayer", "Created recording with ${rec.recordedEvents.size} events for restart")
+                                                    try {
+                                                        recordingRepository.saveRecording(rec)
+                                                        Log.d("MidiPlayer", "MIDI recording saved successfully on restart with ${rec.recordedEvents.size} events")
+                                                    } catch (e: Exception) {
+                                                        Log.e("MidiPlayer", "Failed to save recording on restart", e)
+                                                    }
+                                                } ?: Log.d("MidiPlayer", "No recording to save on restart")
+                                            }
+
+                                            playbackManager.resetPlayback()
+                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
+                                        }
                                     }
                                 ) {
                                     Icon(
@@ -817,190 +961,457 @@ fun MidiPlayerScreen(
                     val sessionDurationMs = System.currentTimeMillis() - sessionStartTimeMs
                     Dialog(
                         onDismissRequest = {
-                            // Save performance data
-                            val performanceRecord = PerformanceRecord(
-                                midiFilePath = midiFile.path,
-                                midiFileName = midiFile.name,
-                                timestamp = System.currentTimeMillis(),
-                                score = score.value,
-                                notesHit = correctlyPlayedNotes.value.size,
-                                notesMissed = totalNotesInSong - correctlyPlayedNotes.value.size,
-                                totalNotes = totalNotesInSong,
-                                bpm = currentBpm ?: 120,
-                                handMode = currentHandMode,
-                                durationMs = sessionDurationMs,
-                                notesPlayed = processedNotes.value.mapIndexed { index, note ->
-                                    PlayedNote(
-                                        noteValue = note.note,
-                                        wasCorrect = note.note in correctlyPlayedNotes.value,
-                                        timestamp = System.currentTimeMillis() - (processedNotes.value.size - index) * 100L, // Approximate relative timing
-                                        isLeftHand = note.isLeftHand
-                                    )
-                                }.take(200) // Limit to 200 notes to keep size reasonable
-                            )
+                            if (!isSavingPerformance) {
+                                scope.launch {
+                                    isSavingPerformance = true
 
-                            scope.launch {
-                                // Save the record asynchronously
-                                performanceRepository.savePerformanceRecord(performanceRecord)
+                                    try {
+                                        // Stop recording if still active (backup safety)
+                                        if (isRecording) {
+                                            recordingManager.stopRecording()
+                                            isRecording = false
+                                            Log.d("MidiPlayer", "Stopped recording in dialog dismissal")
+                                        }
+
+                                        // Save performance data
+                                        val performanceRecord = PerformanceRecord(
+                                            midiFilePath = midiFile.path,
+                                            midiFileName = midiFile.name,
+                                            timestamp = System.currentTimeMillis(),
+                                            score = score.value,
+                                            notesHit = correctlyPlayedNotes.value.size,
+                                            notesMissed = totalNotesInSong - correctlyPlayedNotes.value.size,
+                                            totalNotes = totalNotesInSong,
+                                            bpm = currentBpm ?: 120,
+                                            handMode = currentHandMode,
+                                            durationMs = sessionDurationMs,
+                                            notesPlayed = processedNotes.value.mapIndexed { index, note ->
+                                                PlayedNote(
+                                                    noteValue = note.note,
+                                                    wasCorrect = note.note in correctlyPlayedNotes.value,
+                                                    timestamp = System.currentTimeMillis() - (processedNotes.value.size - index) * 100L,
+                                                    isLeftHand = note.isLeftHand
+                                                )
+                                            }.take(200)
+                                        )
+
+                                        // Save performance record
+                                        performanceRepository.savePerformanceRecord(performanceRecord)
+                                        Log.d("MidiPlayer", "Performance record saved successfully")
+
+                                        val recording = recordingManager.createRecording(
+                                            originalMidiFilePath = midiFile.path,
+                                            originalMidiFileName = midiFile.name,
+                                            bpm = currentBpm ?: 120,
+                                            handMode = currentHandMode,
+                                            score = score.value
+                                        )
+
+                                        recording?.let { rec ->
+                                            Log.d("MidiPlayer", "Created recording with ${rec.recordedEvents.size} events, duration: ${rec.durationMs}ms")
+                                            Log.d("MidiPlayer", "Recording details:")
+                                            Log.d("MidiPlayer", "  - MIDI file: ${rec.originalMidiFileName}")
+                                            Log.d("MidiPlayer", "  - Path: ${rec.originalMidiFilePath}")
+                                            Log.d("MidiPlayer", "  - BPM: ${rec.bpm}")
+                                            Log.d("MidiPlayer", "  - Hand mode: ${rec.handMode}")
+                                            Log.d("MidiPlayer", "  - Score: ${rec.score}")
+
+                                            try {
+                                                recordingRepository.saveRecording(rec)
+                                                Log.d("MidiPlayer", "MIDI recording saved successfully with ${rec.recordedEvents.size} events")
+
+                                                // Verify it was saved by checking the repository
+                                                val allRecordings = recordingRepository.allRecordings.first()
+                                                Log.d("MidiPlayer", "Total recordings in repository after save: ${allRecordings.size}")
+
+                                            } catch (e: Exception) {
+                                                Log.e("MidiPlayer", "Failed to save recording", e)
+                                            }
+                                        } ?: Log.d("MidiPlayer", "No recording to save - recording manager returned null")
+
+                                    } catch (e: Exception) {
+                                        Log.e("MidiPlayer", "Failed to save performance/recording", e)
+                                    } finally {
+                                        isSavingPerformance = false
+                                        showScoreDialog = false
+                                        isRecording = false  // Ensure recording is stopped
+
+                                        // Reset all tracking variables
+                                        correctlyPlayedNotes.value = emptySet()
+                                        missedNotes.value = emptySet()
+                                        processedNotes.value = emptySet()
+                                        totalNotesPlayed = 0
+                                        hasStartedPlaying = false
+                                        isNearEndOfSong = false
+                                        endOfSongTimerStarted = false
+                                    }
+                                }
                             }
-
-                            showScoreDialog = false
-                            // Existing reset states...
                         }
                     ) {
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(12.dp), // Reduced from 16.dp
+                                .padding(12.dp),
                             shape = MaterialTheme.shapes.large,
                             color = MaterialTheme.colorScheme.surface
                         ) {
                             Column(
-                                modifier = Modifier
-                                    .padding(16.dp), // Reduced from 24.dp
+                                modifier = Modifier.padding(16.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
                                     text = "Performance Results",
-                                    style = MaterialTheme.typography.titleMedium, // Changed from headlineSmall
+                                    style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(bottom = 8.dp) // Reduced from 16.dp
+                                    modifier = Modifier.padding(bottom = 8.dp)
                                 )
 
-                                // Smaller score display
-                                Box(
-                                    modifier = Modifier
-                                        .size(90.dp) // Reduced from 120.dp
-                                        .padding(vertical = 4.dp) // Reduced from 8.dp
-                                        .clip(CircleShape)
-                                        .background(
-                                            color = MaterialTheme.colorScheme.primary
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
+                                // Show recording status if recorded
+                                if (recordingManager.getRecordingDuration() > 0) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.padding(bottom = 8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Mic,
+                                                contentDescription = "Recording",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "MIDI performance recorded! (${formatRecordingTime(recordingManager.getRecordingDuration())})",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Show loading indicator while saving
+                                if (isSavingPerformance) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.padding(16.dp)
+                                    )
                                     Text(
-                                        text = "${score.value}%",
+                                        text = "Saving your progress...",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else {
+                                    // Existing score display content
+                                    Box(
+                                        modifier = Modifier
+                                            .size(90.dp)
+                                            .padding(vertical = 4.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                color = MaterialTheme.colorScheme.primary
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "${score.value}%",
+                                            color = Color.White,
+                                            fontSize = 24.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    // Statistics row
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceEvenly
+                                    ) {
+                                        CompactStatisticItem(
+                                            label = "Notes Hit",
+                                            value = "${correctlyPlayedNotes.value.size}",
+                                            modifier = Modifier.weight(1f)
+                                        )
+
+                                        CompactStatisticItem(
+                                            label = "Notes Missed",
+                                            value = "${missedNotes.value.size}",
+                                            modifier = Modifier.weight(1f)
+                                        )
+
+                                        CompactStatisticItem(
+                                            label = "Total",
+                                            value = "$totalNotesInSong",
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    // Grade display
+                                    val grade = when(score.value) {
+                                        in 95..100 -> "A+"
+                                        in 90..94 -> "A"
+                                        in 85..89 -> "B+"
+                                        in 80..84 -> "B"
+                                        in 75..79 -> "C+"
+                                        in 70..74 -> "C"
+                                        in 60..69 -> "D"
+                                        else -> "Keep practicing!"
+                                    }
+
+                                    Text(
+                                        text = if (score.value >= 60) "Grade: $grade" else grade,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = when(score.value) {
+                                            in 90..100 -> Color(0xFF4CAF50)
+                                            in 80..89 -> Color(0xFF8BC34A)
+                                            in 70..79 -> Color(0xFFFFC107)
+                                            in 60..69 -> Color(0xFFFF9800)
+                                            else -> Color(0xFFF44336)
+                                        }
+                                    )
+
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    // Action buttons
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = {
+                                                scope.launch {
+                                                    isSavingPerformance = true
+
+                                                    try {
+                                                        // Save the current performance
+                                                        val performanceRecord = PerformanceRecord(
+                                                            midiFilePath = midiFile.path,
+                                                            midiFileName = midiFile.name,
+                                                            timestamp = System.currentTimeMillis(),
+                                                            score = score.value,
+                                                            notesHit = correctlyPlayedNotes.value.size,
+                                                            notesMissed = totalNotesInSong - correctlyPlayedNotes.value.size,
+                                                            totalNotes = totalNotesInSong,
+                                                            bpm = currentBpm ?: 120,
+                                                            handMode = currentHandMode,
+                                                            durationMs = sessionDurationMs,
+                                                            notesPlayed = processedNotes.value.mapIndexed { index, note ->
+                                                                PlayedNote(
+                                                                    noteValue = note.note,
+                                                                    wasCorrect = note.note in correctlyPlayedNotes.value,
+                                                                    timestamp = System.currentTimeMillis() - (processedNotes.value.size - index) * 100L,
+                                                                    isLeftHand = note.isLeftHand
+                                                                )
+                                                            }.take(200)
+                                                        )
+
+                                                        // Save performance record
+                                                        performanceRepository.savePerformanceRecord(performanceRecord)
+                                                        Log.d("MidiPlayer", "Performance record saved before retry")
+
+                                                        // ALSO SAVE THE RECORDING (this was missing from retry too!)
+                                                        Log.d("MidiPlayer", "Checking for recording to save before retry...")
+                                                        val recording = recordingManager.createRecording(
+                                                            originalMidiFilePath = midiFile.path,
+                                                            originalMidiFileName = midiFile.name,
+                                                            bpm = currentBpm ?: 120,
+                                                            handMode = currentHandMode,
+                                                            score = score.value
+                                                        )
+
+                                                        recording?.let { rec ->
+                                                            Log.d("MidiPlayer", "Created recording with ${rec.recordedEvents.size} events for retry button")
+                                                            try {
+                                                                recordingRepository.saveRecording(rec)
+                                                                Log.d("MidiPlayer", "MIDI recording saved successfully before retry with ${rec.recordedEvents.size} events")
+                                                            } catch (e: Exception) {
+                                                                Log.e("MidiPlayer", "Failed to save recording before retry", e)
+                                                            }
+                                                        } ?: Log.d("MidiPlayer", "No recording to save before retry")
+
+                                                    } catch (e: Exception) {
+                                                        Log.e("MidiPlayer", "Failed to save performance record before retry", e)
+                                                    }
+
+                                                    // Stop recording before restarting
+                                                    if (isRecording) {
+                                                        recordingManager.stopRecording()
+                                                        isRecording = false
+                                                        Log.d("MidiPlayer", "Stopped recording before retry")
+                                                    }
+
+                                                    isSavingPerformance = false
+                                                    showScoreDialog = false
+
+                                                    // Reset and restart
+                                                    correctlyPlayedNotes.value = emptySet()
+                                                    missedNotes.value = emptySet()
+                                                    processedNotes.value = emptySet()
+                                                    totalNotesPlayed = 0
+                                                    hasStartedPlaying = false
+                                                    isNearEndOfSong = false
+                                                    endOfSongTimerStarted = false
+
+                                                    // Restart playback
+                                                    playbackManager.resetPlayback()
+                                                    playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primary
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Refresh,
+                                                contentDescription = "Retry",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                "Try Again",
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                        }
+
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = {
+                                                scope.launch {
+                                                    isSavingPerformance = true
+
+                                                    try {
+                                                        // Save the current performance before going back
+                                                        val performanceRecord = PerformanceRecord(
+                                                            midiFilePath = midiFile.path,
+                                                            midiFileName = midiFile.name,
+                                                            timestamp = System.currentTimeMillis(),
+                                                            score = score.value,
+                                                            notesHit = correctlyPlayedNotes.value.size,
+                                                            notesMissed = totalNotesInSong - correctlyPlayedNotes.value.size,
+                                                            totalNotes = totalNotesInSong,
+                                                            bpm = currentBpm ?: 120,
+                                                            handMode = currentHandMode,
+                                                            durationMs = sessionDurationMs,
+                                                            notesPlayed = processedNotes.value.mapIndexed { index, note ->
+                                                                PlayedNote(
+                                                                    noteValue = note.note,
+                                                                    wasCorrect = note.note in correctlyPlayedNotes.value,
+                                                                    timestamp = System.currentTimeMillis() - (processedNotes.value.size - index) * 100L,
+                                                                    isLeftHand = note.isLeftHand
+                                                                )
+                                                            }.take(200)
+                                                        )
+
+                                                        // Save performance record
+                                                        performanceRepository.savePerformanceRecord(performanceRecord)
+                                                        Log.d("MidiPlayer", "Performance record saved before going back")
+
+                                                        // ALSO SAVE THE RECORDING (this was missing!)
+                                                        Log.d("MidiPlayer", "Checking for recording to save before going back...")
+                                                        val recording = recordingManager.createRecording(
+                                                            originalMidiFilePath = midiFile.path,
+                                                            originalMidiFileName = midiFile.name,
+                                                            bpm = currentBpm ?: 120,
+                                                            handMode = currentHandMode,
+                                                            score = score.value
+                                                        )
+
+                                                        recording?.let { rec ->
+                                                            Log.d("MidiPlayer", "Created recording with ${rec.recordedEvents.size} events for back button")
+                                                            try {
+                                                                recordingRepository.saveRecording(rec)
+                                                                Log.d("MidiPlayer", "MIDI recording saved successfully before going back with ${rec.recordedEvents.size} events")
+
+                                                                // Verify it was saved
+                                                                val allRecordings = recordingRepository.allRecordings.first()
+                                                                Log.d("MidiPlayer", "Total recordings in repository after back button save: ${allRecordings.size}")
+
+                                                            } catch (e: Exception) {
+                                                                Log.e("MidiPlayer", "Failed to save recording before going back", e)
+                                                            }
+                                                        } ?: Log.d("MidiPlayer", "No recording to save before going back")
+
+                                                    } catch (e: Exception) {
+                                                        Log.e("MidiPlayer", "Failed to save performance record before going back", e)
+                                                    }
+
+                                                    isSavingPerformance = false
+                                                    showScoreDialog = false
+                                                    playbackManager.cleanup()
+                                                    onBackPressed()
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.secondary
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.ArrowBack,
+                                                contentDescription = "Back to Library",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                "Back",
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (isRecording) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        contentAlignment = Alignment.TopEnd
+                    ) {
+                        Surface(
+                            color = Color.Red.copy(alpha = 0.9f),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.padding(8.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.FiberManualRecord,
+                                        contentDescription = "Recording",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "REC ${formatRecordingTime(recordingDuration)}",
                                         color = Color.White,
-                                        fontSize = 24.sp, // Reduced from 32.sp
+                                        style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
-
-                                Spacer(modifier = Modifier.height(8.dp)) // Reduced from 16.dp
-
-                                // More compact statistics
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceEvenly // Changed from SpaceBetween
-                                ) {
-                                    CompactStatisticItem(
-                                        label = "Notes Hit",
-                                        value = "${correctlyPlayedNotes.value.size}",
-                                        modifier = Modifier.weight(1f)
-                                    )
-
-                                    CompactStatisticItem(
-                                        label = "Notes Missed",
-                                        value = "${missedNotes.value.size}",
-                                        modifier = Modifier.weight(1f)
-                                    )
-
-                                    CompactStatisticItem(
-                                        label = "Total",
-                                        value = "$totalNotesInSong", // Shortened label
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp)) // Reduced from 16.dp
-
-                                // Grade based on score
-                                val grade = when(score.value) {
-                                    in 95..100 -> "A+"
-                                    in 90..94 -> "A"
-                                    in 85..89 -> "B+"
-                                    in 80..84 -> "B"
-                                    in 75..79 -> "C+"
-                                    in 70..74 -> "C"
-                                    in 60..69 -> "D"
-                                    else -> "Keep practicing!"
-                                }
-
                                 Text(
-                                    text = if (score.value >= 60) "Grade: $grade" else grade,
-                                    style = MaterialTheme.typography.titleMedium, // Changed from titleLarge
-                                    fontWeight = FontWeight.Bold,
-                                    color = when(score.value) {
-                                        in 90..100 -> Color(0xFF4CAF50) // Green for A grades
-                                        in 80..89 -> Color(0xFF8BC34A) // Light Green for B grades
-                                        in 70..79 -> Color(0xFFFFC107) // Amber for C grades
-                                        in 60..69 -> Color(0xFFFF9800) // Orange for D grades
-                                        else -> Color(0xFFF44336) // Red for failing
-                                    }
+                                    text = "Auto-stops at song end",
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp
                                 )
-
-                                Spacer(modifier = Modifier.height(12.dp)) // Reduced from 24.dp
-
-                                // More compact buttons layout
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp) // Added spacing instead of SpaceEvenly
-                                ) {
-                                    Button(
-                                        modifier = Modifier.weight(1f), // Make buttons fill available width
-                                        onClick = {
-                                            showScoreDialog = false
-                                            // Reset and restart
-                                            correctlyPlayedNotes.value = emptySet()
-                                            missedNotes.value = emptySet()
-                                            processedNotes.value = emptySet()
-                                            totalNotesPlayed = 0
-
-                                            // Restart playback
-                                            playbackManager.resetPlayback()
-                                            playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
-                                        },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary
-                                        ),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp) // More compact padding
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Refresh,
-                                            contentDescription = "Retry",
-                                            modifier = Modifier.size(16.dp) // Smaller icon
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp)) // Reduced from 8.dp
-                                        Text(
-                                            "Try Again",
-                                            style = MaterialTheme.typography.bodyMedium // Smaller text
-                                        )
-                                    }
-
-                                    Button(
-                                        modifier = Modifier.weight(1f), // Make buttons fill available width
-                                        onClick = {
-                                            showScoreDialog = false
-                                            playbackManager.cleanup()
-                                            onBackPressed()
-                                        },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.secondary
-                                        ),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp) // More compact padding
-                                    ) {
-                                        Icon(
-                                            Icons.Default.ArrowBack,
-                                            contentDescription = "Back to Library",
-                                            modifier = Modifier.size(16.dp) // Smaller icon
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp)) // Reduced from 8.dp
-                                        Text(
-                                            "Back", // Shortened label
-                                            style = MaterialTheme.typography.bodyMedium // Smaller text
-                                        )
-                                    }
-                                }
                             }
                         }
                     }

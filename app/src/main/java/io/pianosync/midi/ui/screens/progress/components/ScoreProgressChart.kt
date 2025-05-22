@@ -50,7 +50,7 @@ fun ScoreProgressChart(
         Column(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .padding(end = 8.dp),
+                .padding(end = 12.dp, top = 24.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Text("100%", fontSize = 10.sp)

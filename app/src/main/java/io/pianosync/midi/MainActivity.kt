@@ -21,6 +21,7 @@ import androidx.navigation.navArgument
 import io.pianosync.midi.data.manager.MidiConnectionManager
 import io.pianosync.midi.data.model.MidiFile
 import io.pianosync.midi.data.repository.MidiFileRepository
+import io.pianosync.midi.data.repository.MidiRecordingRepository
 import io.pianosync.midi.data.repository.PerformanceRepository
 import io.pianosync.midi.ui.screens.home.HomeScreen
 import io.pianosync.midi.ui.screens.player.MidiPlayerScreen
@@ -50,6 +51,7 @@ class MainActivity : ComponentActivity() {
 
                 // Add Performance Repository initialization
                 val performanceRepository = remember(context) { PerformanceRepository(context) }
+                val recordingRepository = remember(context) { MidiRecordingRepository(context) }
 
                 var loadedMidiFiles by remember { mutableStateOf<List<MidiFile>>(emptyList()) }
 
@@ -84,6 +86,7 @@ class MainActivity : ComponentActivity() {
                             ProgressTrackingScreen(
                                 midiFileRepository = repository,
                                 performanceRepository = performanceRepository,
+                                recordingRepository = recordingRepository,
                                 onBackPressed = {
                                     navController.popBackStack()
                                 }
@@ -113,6 +116,7 @@ class MainActivity : ComponentActivity() {
                                     midiFile = midiFile,
                                     repository = repository,
                                     performanceRepository = performanceRepository, // Pass the repository
+                                    recordingRepository = recordingRepository,
                                     onBackPressed = {
                                         navController.popBackStack()
                                     }

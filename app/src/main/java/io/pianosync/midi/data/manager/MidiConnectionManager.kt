@@ -21,6 +21,9 @@ class MidiConnectionManager private constructor(private val context: Context) {
     private var midiInputPort: MidiInputPort? = null
     private var midiOutputPort: MidiOutputPort? = null
 
+    // Add recording manager
+    private val recordingManager = MidiRecordingManager()
+
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
@@ -29,6 +32,9 @@ class MidiConnectionManager private constructor(private val context: Context) {
     val pressedKeys: StateFlow<Set<Int>> = _pressedKeys.asStateFlow()
     val releasedKeys: StateFlow<Set<Int>> = _releasedKeys.asStateFlow()
     private val _errorMessage = MutableStateFlow<String?>(null)
+
+    // Expose recording manager
+    fun getRecordingManager(): MidiRecordingManager = recordingManager
 
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private val deviceCallback = object : MidiManager.DeviceCallback() {
@@ -114,6 +120,13 @@ class MidiConnectionManager private constructor(private val context: Context) {
                         val status = msg[offset].toInt() and 0xF0
                         val note = msg[offset + 1].toInt()
                         val velocity = msg[offset + 2].toInt()
+                        val channel = msg[offset].toInt() and 0x0F
+
+                        // Debug logging for MIDI events
+                        Log.d("MidiConnection", "MIDI Event: status=${status.toString(16)}, note=$note, velocity=$velocity")
+
+                        // Record MIDI event if recording is active
+                        recordingManager.recordMidiEvent(status, note, velocity, channel)
 
                         when (status) {
                             0x90 -> { // Note On
@@ -196,8 +209,6 @@ class MidiConnectionManager private constructor(private val context: Context) {
         }
         closeCurrentDevice()
     }
-
-
 
     companion object {
         @Volatile

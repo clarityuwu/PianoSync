@@ -17,14 +17,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import io.pianosync.midi.data.manager.RecordingPlaybackManager
 import io.pianosync.midi.data.model.MidiFile
+import io.pianosync.midi.data.model.MidiRecording
 import io.pianosync.midi.data.model.PerformanceRecord
 import io.pianosync.midi.data.model.PlayedNote
 import io.pianosync.midi.data.repository.MidiFileRepository
+import io.pianosync.midi.data.repository.MidiRecordingRepository
 import io.pianosync.midi.data.repository.PerformanceRepository
 import io.pianosync.midi.ui.screens.player.HandMode
 import io.pianosync.midi.ui.screens.progress.components.*
@@ -34,28 +39,331 @@ import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToInt
 
+@Composable
+fun MidiRecordingCard(
+    recording: MidiRecording,
+    onPlay: () -> Unit,
+    onSave: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (recording.isSaved) recording.title else "Recording",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Text(
+                        text = formatDateTime(recording.timestamp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                if (recording.isSaved) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = "SAVED",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Recording stats
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Duration: ${formatDuration(recording.durationMs)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                Text(
+                    text = "${recording.bpm} BPM • ${recording.handMode.name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                recording.score?.let { score ->
+                    Text(
+                        text = "Score: $score%",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = getScoreColor(score)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Action buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onPlay,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = "Play",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Play")
+                }
+
+                if (!recording.isSaved) {
+                    OutlinedButton(
+                        onClick = onSave,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            Icons.Default.Save,
+                            contentDescription = "Save",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Save")
+                    }
+                }
+
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        tint = Color.Red
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RecordingPlaybackDialog(
+    recording: MidiRecording,
+    playbackManager: RecordingPlaybackManager,
+    onDismiss: () -> Unit
+) {
+    val isPlaying by playbackManager.isPlaying.collectAsState()
+    val currentTime by playbackManager.currentTimeMs.collectAsState()
+    val pressedKeys by playbackManager.pressedKeys.collectAsState()
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = "Play Recording",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = recording.displayName,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Progress bar
+                LinearProgressIndicator(
+                    progress = if (recording.durationMs > 0) {
+                        (currentTime.toFloat() / recording.durationMs.toFloat()).coerceIn(0f, 1f)
+                    } else 0f,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Time display
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = formatDuration(currentTime),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        text = formatDuration(recording.durationMs),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Playback controls
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    IconButton(
+                        onClick = { playbackManager.seekTo(0) }
+                    ) {
+                        Icon(Icons.Default.SkipPrevious, contentDescription = "Restart")
+                    }
+
+                    IconButton(
+                        onClick = {
+                            if (isPlaying) {
+                                playbackManager.pausePlayback()
+                            } else {
+                                if (currentTime > 0) {
+                                    playbackManager.resumePlayback()
+                                } else {
+                                    playbackManager.startPlayback(recording)
+                                }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isPlaying) "Pause" else "Play"
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { playbackManager.stopPlayback() }
+                    ) {
+                        Icon(Icons.Default.Stop, contentDescription = "Stop")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Close button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Close")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SaveRecordingDialog(
+    recording: MidiRecording,
+    title: String,
+    onTitleChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Save Recording") },
+        text = {
+            Column {
+                Text("Give your recording a name:")
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = onTitleChange,
+                    label = { Text("Recording title") },
+                    placeholder = { Text("My awesome performance") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onSave,
+                enabled = title.isNotBlank()
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProgressTrackingScreen(
     midiFileRepository: MidiFileRepository,
     performanceRepository: PerformanceRepository,
+    recordingRepository: MidiRecordingRepository, // Add this parameter
     onBackPressed: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
-    var midiFiles by remember { mutableStateOf<List<MidiFile>>(emptyList()) }
-    var performanceData by remember { mutableStateOf<Map<String, List<PerformanceRecord>>>(emptyMap()) }
-    var allPerformances by remember { mutableStateOf<List<PerformanceRecord>>(emptyList()) }
     var selectedFile by remember { mutableStateOf<MidiFile?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+    var refreshTrigger by remember { mutableStateOf(0) }
+    val context = LocalContext.current
+    val recordingPlaybackManager = remember { RecordingPlaybackManager(context) }
+    var allRecordings by remember { mutableStateOf<List<MidiRecording>>(emptyList()) }
+    var showRecordingDialog by remember { mutableStateOf<MidiRecording?>(null) }
+    var recordingToSave by remember { mutableStateOf<MidiRecording?>(null) }
+    var saveRecordingTitle by remember { mutableStateOf("") }
 
-    // Load all the data
-    LaunchedEffect(Unit) {
-        coroutineScope.launch {
-            midiFiles = midiFileRepository.midiFiles.first()
-            allPerformances = performanceRepository.performanceHistory.first()
-            performanceData = performanceRepository.getRecentPerformancesByFile()
-            isLoading = false
+    // Use collectAsState to automatically refresh when data changes
+    val midiFiles by midiFileRepository.midiFiles.collectAsState(initial = emptyList())
+    val allPerformances by performanceRepository.performanceHistory.collectAsState(initial = emptyList())
+
+    // Derived state that updates when allPerformances changes
+    val performanceData by remember {
+        derivedStateOf {
+            allPerformances.groupBy { it.midiFilePath }
+                .mapValues { (_, records) ->
+                    records.sortedByDescending { it.timestamp }.take(5)
+                }
+        }
+    }
+
+    // Load recordings data - use the passed recordingRepository
+    LaunchedEffect(refreshTrigger) {
+        isLoading = true
+        kotlinx.coroutines.delay(100)
+        allRecordings = recordingRepository.allRecordings.first()
+        isLoading = false
+
+        // Debug logging
+        android.util.Log.d("ProgressTracking", "Loaded ${allRecordings.size} recordings")
+        allRecordings.forEach { recording ->
+            android.util.Log.d("ProgressTracking", "Recording: ${recording.originalMidiFileName} - ${recording.timestamp}")
         }
     }
 
@@ -66,6 +374,16 @@ fun ProgressTrackingScreen(
                 navigationIcon = {
                     IconButton(onClick = onBackPressed) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    // Add refresh button
+                    IconButton(
+                        onClick = {
+                            refreshTrigger++
+                        }
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                     }
                 }
             )
@@ -132,6 +450,43 @@ fun ProgressTrackingScreen(
                             EmptyStateMessage("No practice data yet for this piece.")
                         }
                     }
+
+                    // Recordings section for selected file
+                    val fileRecordings = allRecordings.filter { it.originalMidiFilePath == selectedFile?.path }
+
+                    if (fileRecordings.isNotEmpty()) {
+                        item {
+                            Text(
+                                text = "MIDI Recordings (${fileRecordings.size})",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+
+                        items(fileRecordings.take(5)) { recording ->
+                            MidiRecordingCard(
+                                recording = recording,
+                                onPlay = { showRecordingDialog = recording },
+                                onSave = {
+                                    if (!recording.isSaved) {
+                                        recordingToSave = recording
+                                        saveRecordingTitle = ""
+                                    }
+                                },
+                                onDelete = {
+                                    coroutineScope.launch {
+                                        recordingRepository.deleteRecording(recording.id)
+                                        allRecordings = recordingRepository.allRecordings.first()
+                                    }
+                                }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    } else {
+                        item {
+                            EmptyStateMessage("No recordings yet for this piece. Start playing with a connected piano to record!")
+                        }
+                    }
                 } else {
                     // Show progress for all files
                     item {
@@ -145,9 +500,73 @@ fun ProgressTrackingScreen(
                     item {
                         AllFilesSummary(performanceData, midiFiles)
                     }
+
+                    // Show all recordings when no specific file is selected
+                    if (allRecordings.isNotEmpty()) {
+                        item {
+                            Text(
+                                text = "Recent Recordings (${allRecordings.size})",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+
+                        items(allRecordings.take(10)) { recording ->
+                            MidiRecordingCard(
+                                recording = recording,
+                                onPlay = { showRecordingDialog = recording },
+                                onSave = {
+                                    if (!recording.isSaved) {
+                                        recordingToSave = recording
+                                        saveRecordingTitle = ""
+                                    }
+                                },
+                                onDelete = {
+                                    coroutineScope.launch {
+                                        recordingRepository.deleteRecording(recording.id)
+                                        allRecordings = recordingRepository.allRecordings.first()
+                                    }
+                                }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
                 }
             }
         }
+    }
+
+    // Recording playback dialog
+    showRecordingDialog?.let { recording ->
+        RecordingPlaybackDialog(
+            recording = recording,
+            playbackManager = recordingPlaybackManager,
+            onDismiss = {
+                showRecordingDialog = null
+                recordingPlaybackManager.stopPlayback()
+            }
+        )
+    }
+
+    // Save recording dialog
+    recordingToSave?.let { recording ->
+        SaveRecordingDialog(
+            recording = recording,
+            title = saveRecordingTitle,
+            onTitleChange = { saveRecordingTitle = it },
+            onSave = {
+                coroutineScope.launch {
+                    recordingRepository.saveRecordingPermanently(recording.id, saveRecordingTitle)
+                    allRecordings = recordingRepository.allRecordings.first()
+                    recordingToSave = null
+                    saveRecordingTitle = ""
+                }
+            },
+            onDismiss = {
+                recordingToSave = null
+                saveRecordingTitle = ""
+            }
+        )
     }
 }
 
