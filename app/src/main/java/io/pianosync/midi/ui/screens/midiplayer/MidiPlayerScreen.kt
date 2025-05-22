@@ -369,7 +369,7 @@ fun MidiPlayerScreen(
     var isSavingPerformance by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     val recordingManager = remember { midiConnectionManager.getRecordingManager() }
-    val recordingState by recordingManager.recordingState.collectAsState()
+    var wasManuallyPaused by remember { mutableStateOf(false) }
     var recordingDuration by remember { mutableStateOf(0L) }
     val isConnected by midiConnectionManager.isConnected.collectAsState()
 
@@ -483,24 +483,31 @@ fun MidiPlayerScreen(
 
     LaunchedEffect(isPlaybackActive) {
         if (!isPlaybackActive && hasStartedPlaying && !isPreLoading && !showScoreDialog) {
-            hasStartedPlaying = false
+            // Only show score dialog if the song actually ended naturally, not if manually paused
+            if (!wasManuallyPaused) {
+                hasStartedPlaying = false
 
-            // Stop recording when playback stops after significant progress
-            if (isRecording) {
-                recordingManager.stopRecording()
-                isRecording = false
-                Log.d("MidiPlayer", "Stopped recording automatically - playback ended")
+                // Stop recording when playback stops after significant progress
+                if (isRecording) {
+                    recordingManager.stopRecording()
+                    isRecording = false
+                    Log.d("MidiPlayer", "Stopped recording automatically - playback ended")
+                }
+
+                // Check if we've played a significant portion and song ended naturally
+                val lastNoteTime = if (midiNotes.isNotEmpty()) {
+                    midiNotes.maxOf { it.startTime + it.duration }
+                } else 0L
+
+                // Only show score if we're very close to the actual end (95% instead of 70%)
+                // and this wasn't a manual pause
+                if (currentTimeMs > lastNoteTime * 0.95) {
+                    Log.d("MidiPlayer", "Playback stopped after significant progress, showing score")
+                    showScoreDialog = true
+                }
             }
-
-            // Check if we've played a significant portion
-            val lastNoteTime = if (midiNotes.isNotEmpty()) {
-                midiNotes.maxOf { it.startTime + it.duration }
-            } else 0L
-
-            if (currentTimeMs > lastNoteTime * 0.7) {
-                Log.d("MidiPlayer", "Playback stopped after significant progress, showing score")
-                showScoreDialog = true
-            }
+            // Reset the manual pause flag when playback stops
+            wasManuallyPaused = false
         } else if (isPlaybackActive && !hasStartedPlaying) {
             hasStartedPlaying = true
         }
@@ -916,13 +923,16 @@ fun MidiPlayerScreen(
                                     )
                                 }
 
-                                // Play/Pause Button
                                 IconButton(
                                     onClick = {
                                         lastInteractionTime = System.currentTimeMillis()
                                         if (isPlaybackActive) {
+                                            // User manually paused
+                                            wasManuallyPaused = true
                                             playbackManager.pausePlayback()
                                         } else {
+                                            // User resumed or started playback
+                                            wasManuallyPaused = false
                                             if (currentTimeMs > 0) {
                                                 playbackManager.resumePlayback(midiFile)
                                             } else {

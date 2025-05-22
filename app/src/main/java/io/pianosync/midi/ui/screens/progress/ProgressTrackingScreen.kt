@@ -1,5 +1,6 @@
 package io.pianosync.midi.ui.screens.progress
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -152,7 +153,6 @@ fun MidiRecordingCard(
                         Text("Save")
                     }
                 } else {
-                    // Only show export button for saved recordings
                     OutlinedButton(
                         onClick = {
                             scope.launch {
@@ -164,8 +164,21 @@ fun MidiRecordingCard(
 
                                 exportedFile?.let { file ->
                                     android.util.Log.d("Export", "Recording exported to: ${file.absolutePath}")
-                                    // Optional: Show a toast or snackbar
-                                    // Toast.makeText(context, "Exported to ${file.absolutePath}", Toast.LENGTH_LONG).show()
+
+                                    // Show toast with the export directory
+                                    val exportDirectory = file.parentFile?.absolutePath ?: "Unknown location"
+                                    Toast.makeText(
+                                        context,
+                                        "Recording exported to:\n$exportDirectory",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                } ?: run {
+                                    // Show error toast if export failed
+                                    Toast.makeText(
+                                        context,
+                                        "Failed to export recording",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 }
                             }
                         },
