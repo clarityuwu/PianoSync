@@ -640,8 +640,8 @@ fun MidiPlayerScreen(
                             IconButton(
                                 onClick = {
                                     scope.launch {
-                                        // Stop recording and save it if there's one
-                                        if (isRecording || recordingManager.getRecordingDuration() > 0) {
+                                        // Check if we have a recording to save
+                                        if (isRecording || recordingManager.hasRecordedEvents()) {
                                             Log.d("MidiPlayer", "Saving recording before navigation back...")
 
                                             // Stop recording if still active
@@ -651,7 +651,7 @@ fun MidiPlayerScreen(
                                                 Log.d("MidiPlayer", "Stopped recording - navigation back")
                                             }
 
-                                            // Create and save the recording
+                                            // Create and save the recording (events are still available)
                                             val recording = recordingManager.createRecording(
                                                 originalMidiFilePath = midiFile.path,
                                                 originalMidiFileName = midiFile.name,
@@ -673,7 +673,7 @@ fun MidiPlayerScreen(
                                                 } catch (e: Exception) {
                                                     Log.e("MidiPlayer", "Failed to save recording on navigation back", e)
                                                 }
-                                            } ?: Log.d("MidiPlayer", "No recording to save on navigation back")
+                                            } ?: Log.d("MidiPlayer", "No recording created - no events available")
                                         }
 
                                         playbackManager.cleanup()

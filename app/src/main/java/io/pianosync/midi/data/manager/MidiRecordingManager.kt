@@ -40,9 +40,9 @@ class MidiRecordingManager {
             isRecording = false
             _recordingState.value = RecordingState.Stopped
             Log.d("MidiRecording", "Stopped MIDI recording. Recorded ${recordedEvents.size} events")
-            return recordedEvents.toList()
         }
-        return emptyList()
+        // Always return events, even if already stopped
+        return recordedEvents.toList()
     }
 
     /**
@@ -77,12 +77,22 @@ class MidiRecordingManager {
         handMode: HandMode,
         score: Int? = null
     ): MidiRecording? {
-        val events = stopRecording()
-        if (events.isEmpty()) return null
+        // Get events without stopping again
+        val events = recordedEvents.toList()
+
+        // Clear events after getting them
+        recordedEvents.clear()
+
+        if (events.isEmpty()) {
+            Log.d("MidiRecording", "No events to create recording from")
+            return null
+        }
 
         val durationMs = if (events.isNotEmpty()) {
             events.maxOfOrNull { it.timestamp } ?: 0L
         } else 0L
+
+        Log.d("MidiRecording", "Creating recording with ${events.size} events, duration: ${durationMs}ms")
 
         return MidiRecording(
             originalMidiFilePath = originalMidiFilePath,
@@ -117,6 +127,11 @@ class MidiRecordingManager {
         recordedEvents.clear()
         Log.d("MidiRecording", "Cleared current recording")
     }
+
+    /**
+     * Check if there are recorded events available
+     */
+    fun hasRecordedEvents(): Boolean = recordedEvents.isNotEmpty()
 
     sealed class RecordingState {
         object Stopped : RecordingState()

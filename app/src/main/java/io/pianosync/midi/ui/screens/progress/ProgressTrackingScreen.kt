@@ -37,15 +37,18 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.math.roundToInt
 
 @Composable
 fun MidiRecordingCard(
     recording: MidiRecording,
+    recordingRepository: MidiRecordingRepository, // Add this parameter
     onPlay: () -> Unit,
     onSave: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp)
@@ -115,7 +118,6 @@ fun MidiRecordingCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Action buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -148,6 +150,34 @@ fun MidiRecordingCard(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Save")
+                    }
+                } else {
+                    // Only show export button for saved recordings
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                val exportedFile = recordingRepository.exportRecordingAsMidiFile(
+                                    context = context,
+                                    recording = recording,
+                                    fileName = "${recording.displayName}.mid"
+                                )
+
+                                exportedFile?.let { file ->
+                                    android.util.Log.d("Export", "Recording exported to: ${file.absolutePath}")
+                                    // Optional: Show a toast or snackbar
+                                    // Toast.makeText(context, "Exported to ${file.absolutePath}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            Icons.Default.Download,
+                            contentDescription = "Export",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Export")
                     }
                 }
 
@@ -466,6 +496,7 @@ fun ProgressTrackingScreen(
                         items(fileRecordings.take(5)) { recording ->
                             MidiRecordingCard(
                                 recording = recording,
+                                recordingRepository = recordingRepository, // Add this line
                                 onPlay = { showRecordingDialog = recording },
                                 onSave = {
                                     if (!recording.isSaved) {
@@ -514,6 +545,7 @@ fun ProgressTrackingScreen(
                         items(allRecordings.take(10)) { recording ->
                             MidiRecordingCard(
                                 recording = recording,
+                                recordingRepository = recordingRepository, // Add this line
                                 onPlay = { showRecordingDialog = recording },
                                 onSave = {
                                     if (!recording.isSaved) {
