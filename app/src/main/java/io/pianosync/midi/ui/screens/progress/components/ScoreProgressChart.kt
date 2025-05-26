@@ -1,26 +1,27 @@
 package io.pianosync.midi.ui.screens.progress.components
 
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.pianosync.midi.ui.screens.progress.ScoreDataPoint
+import kotlinx.coroutines.delay
 
 /**
- * A chart that visualizes score progress over time
+ * A chart that visualizes score progress over time with smooth drawing animations
  */
 @Composable
 fun ScoreProgressChart(
@@ -29,6 +30,47 @@ fun ScoreProgressChart(
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
     if (data.isEmpty()) return
+
+    // Animation states
+    var animationStarted by remember { mutableStateOf(false) }
+
+    // Grid animation - animates from 0f to 1f over 300ms
+    val gridProgress by animateFloatAsState(
+        targetValue = if (animationStarted) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = 300,
+            easing = FastOutSlowInEasing
+        ),
+        label = "gridAnimation"
+    )
+
+    // Line drawing animation - starts after grid, takes 800ms
+    val lineProgress by animateFloatAsState(
+        targetValue = if (animationStarted) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = 800,
+            delayMillis = 200,
+            easing = EaseInOutCubic
+        ),
+        label = "lineAnimation"
+    )
+
+    // Points animation - starts after line begins, staggers each point
+    val pointsProgress by animateFloatAsState(
+        targetValue = if (animationStarted) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = 600,
+            delayMillis = 400,
+            easing = EaseOutBack
+        ),
+        label = "pointsAnimation"
+    )
+
+    // Start animation when component loads
+    LaunchedEffect(data) {
+        delay(100) // Small delay for smoother appearance
+        animationStarted = true
+    }
 
     Box(
         modifier = modifier
@@ -60,7 +102,7 @@ fun ScoreProgressChart(
             Text("0%", fontSize = 10.sp)
         }
 
-        // Main chart canvas
+        // Main chart canvas with animations
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
@@ -70,24 +112,21 @@ fun ScoreProgressChart(
             val height = size.height
             val horizontalStep = width / (data.size - 1).coerceAtLeast(1)
 
-            // Draw grid lines
-            val gridColor = Color.Gray.copy(alpha = 0.2f)
+            // Draw grid lines with animation
+            val gridColor = Color.Gray.copy(alpha = 0.2f * gridProgress)
             val gridLineCount = 4
             val gridStep = height / gridLineCount
 
             repeat(gridLineCount + 1) { i ->
                 val y = i * gridStep
+                val lineWidth = width * gridProgress
                 drawLine(
                     color = gridColor,
                     start = Offset(0f, y),
-                    end = Offset(width, y),
+                    end = Offset(lineWidth, y),
                     strokeWidth = 1f
                 )
             }
-
-            // Create line path
-            val path = Path()
-            var startedPath = false
 
             // Find min and max score for proper scaling
             val minScore = data.minOfOrNull { it.score }?.coerceAtLeast(0f) ?: 0f
@@ -98,34 +137,90 @@ fun ScoreProgressChart(
             val effectiveMaxScore = if (maxScore - minScore > 30f) maxScore.coerceAtLeast(minScore + 30f) else 100f
             val scoreRange = (effectiveMaxScore - effectiveMinScore).coerceAtLeast(1f)
 
-            data.forEachIndexed { index, point ->
+            // Calculate all point positions
+            val points = data.mapIndexed { index, point ->
                 val x = index * horizontalStep
-                // Calculate y position with proper normalization
                 val normalizedScore = (point.score - effectiveMinScore) / scoreRange
                 val y = height * (1f - normalizedScore.coerceIn(0f, 1f))
+                Offset(x, y)
+            }
 
-                if (!startedPath) {
-                    path.moveTo(x, y)
-                    startedPath = true
-                } else {
-                    path.lineTo(x, y)
+            // Draw animated line path
+            if (points.isNotEmpty() && lineProgress > 0f) {
+                val animatedPath = Path()
+
+                // Calculate how many points to include based on animation progress
+                val totalPathLength = data.size - 1
+                val currentPathLength = (totalPathLength * lineProgress).coerceIn(0f, totalPathLength.toFloat())
+                val completePoints = currentPathLength.toInt()
+                val partialProgress = currentPathLength - completePoints
+
+                // Add complete points
+                if (completePoints >= 0 && completePoints < points.size) {
+                    animatedPath.moveTo(points[0].x, points[0].y)
+
+                    for (i in 1..completePoints.coerceAtMost(points.size - 1)) {
+                        animatedPath.lineTo(points[i].x, points[i].y)
+                    }
+
+                    // Add partial segment if needed
+                    if (partialProgress > 0f && completePoints + 1 < points.size) {
+                        val startPoint = points[completePoints]
+                        val endPoint = points[completePoints + 1]
+                        val partialX = startPoint.x + (endPoint.x - startPoint.x) * partialProgress
+                        val partialY = startPoint.y + (endPoint.y - startPoint.y) * partialProgress
+                        animatedPath.lineTo(partialX, partialY)
+                    }
                 }
 
-                // Draw points
-                val pointColor = getScoreColor(point.score.toInt())
-                drawCircle(
-                    color = pointColor,
-                    radius = 4f,
-                    center = Offset(x, y)
+                // Draw the animated path with a subtle glow effect
+                drawPath(
+                    path = animatedPath,
+                    color = primaryColor.copy(alpha = 0.3f),
+                    style = Stroke(width = 6f)
+                )
+                drawPath(
+                    path = animatedPath,
+                    color = primaryColor,
+                    style = Stroke(width = 2f)
                 )
             }
 
-            // Draw line connecting points
-            drawPath(
-                path = path,
-                color = primaryColor,
-                style = Stroke(width = 2f)
-            )
+            // Draw animated data points
+            if (pointsProgress > 0f) {
+                points.forEachIndexed { index, point ->
+                    // Calculate individual point animation delay
+                    val pointDelay = index.toFloat() / points.size.toFloat()
+                    val pointProgress = ((pointsProgress - pointDelay) / (1f - pointDelay)).coerceIn(0f, 1f)
+
+                    if (pointProgress > 0f) {
+                        val pointColor = getScoreColor(data[index].score.toInt())
+                        val animatedRadius = 4f * pointProgress
+                        val animatedAlpha = pointProgress
+
+                        // Draw point shadow/glow
+                        drawCircle(
+                            color = pointColor.copy(alpha = 0.3f * animatedAlpha),
+                            radius = animatedRadius * 1.8f,
+                            center = point
+                        )
+
+                        // Draw main point
+                        drawCircle(
+                            color = pointColor.copy(alpha = animatedAlpha),
+                            radius = animatedRadius,
+                            center = point
+                        )
+
+                        // Draw inner highlight
+                        drawCircle(
+                            color = Color.White.copy(alpha = 0.6f * animatedAlpha),
+                            radius = animatedRadius * 0.4f,
+                            center = point
+                        )
+                    }
+                }
+            }
         }
 
         // X-axis labels (dates)
