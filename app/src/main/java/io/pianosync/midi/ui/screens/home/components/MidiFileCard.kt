@@ -1,8 +1,10 @@
 package io.pianosync.midi.ui.screens.home.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
@@ -12,6 +14,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
@@ -20,6 +24,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.*
+import androidx.compose.animation.animateColorAsState
 import io.pianosync.midi.R
 import io.pianosync.midi.data.model.MidiFile
 import io.pianosync.midi.data.model.PerformanceRecord
@@ -29,13 +35,29 @@ import java.util.Date
 import kotlin.math.roundToInt
 
 /**
- * A card component that displays MIDI file information with progress indicators
+ * Enhanced MIDI File Card with beautiful gradient backgrounds and music-themed colors
  *
- * @param midiFile The MIDI file to display
- * @param recentPerformances Recent performance records for this file
- * @param onClick Callback invoked when the card is clicked
- * @param onDelete Callback invoked when deletion is confirmed
- * @param modifier Optional modifier for the component
+ * Features:
+ * - Intelligent gradient selection based on file characteristics and performance
+ * - Smooth press/hover animations with spring physics
+ * - Recent activity indicators with subtle pulsing
+ * - Enhanced text with subtle shadows for better readability
+ * - Progress indicators with glow effects
+ * - Performance trend visualization
+ *
+ * Usage: Replace the existing MidiFileCard in your HomeScreen composable
+ */
+
+/**
+ * Get a gradient based on the MIDI file's characteristics using the new gradient system
+ */
+private fun getGradientForMidiFile(midiFile: MidiFile, recentPerformances: List<PerformanceRecord>): Brush {
+    // Use the new gradient selector system for intelligent gradient selection
+    return midiFile.getGradient(recentPerformances)
+}
+
+/**
+ * A card component that displays MIDI file information with gradient backgrounds and progress indicators
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -47,10 +69,48 @@ fun MidiFileCard(
     modifier: Modifier = Modifier
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var isPressed by remember { mutableStateOf(false) }
 
     // Calculate progress metrics
     val progressData = calculateProgressData(recentPerformances)
     val lastPlayedTime = recentPerformances.firstOrNull()?.timestamp
+
+    // Get the gradient for this card
+    val cardGradient = getGradientForMidiFile(midiFile, recentPerformances)
+
+    // Animation states
+    val animatedScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "cardScale"
+    )
+
+    val animatedElevation by animateDpAsState(
+        targetValue = if (isPressed) 2.dp else 8.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "cardElevation"
+    )
+
+    // Subtle pulsing animation for cards with recent activity
+    val pulseAnimation = rememberInfiniteTransition(label = "pulse")
+    val hasRecentActivity = recentPerformances.isNotEmpty() &&
+            (System.currentTimeMillis() - (lastPlayedTime ?: 0)) < 24 * 60 * 60 * 1000 // 24 hours
+
+    val pulseAlpha by pulseAnimation.animateFloat(
+        initialValue = 0.8f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -79,93 +139,211 @@ fun MidiFileCard(
 
     Card(
         modifier = modifier
-            .width(180.dp) // Slightly wider to accommodate new content
-            .height(220.dp) // Slightly taller
+            .width(180.dp)
+            .height(220.dp)
+            .graphicsLayer {
+                scaleX = animatedScale
+                scaleY = animatedScale
+            }
+            .shadow(
+                elevation = animatedElevation,
+                shape = RoundedCornerShape(16.dp),
+                ambientColor = Color.Black.copy(alpha = 0.1f),
+                spotColor = Color.Black.copy(alpha = 0.1f)
+            )
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = { showDeleteDialog = true }
             ),
         colors = CardDefaults.cardColors(
-            containerColor = cardBackgroundColor(),
-            contentColor = cardContentColor()
+            containerColor = Color.Transparent,
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp), // Handled by shadow
+        shape = RoundedCornerShape(16.dp)
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(cardGradient)
+                .graphicsLayer {
+                    // Apply pulse effect for recent activity
+                    if (hasRecentActivity) {
+                        alpha = pulseAlpha
+                    }
+                }
         ) {
-            // Header with icon and progress
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // Add a subtle shimmer overlay for premium feel
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.1f),
+                                Color.Transparent,
+                                Color.White.copy(alpha = 0.05f)
+                            ),
+                            start = androidx.compose.ui.geometry.Offset(0f, 0f),
+                            end = androidx.compose.ui.geometry.Offset(1f, 1f)
+                        )
+                    )
+            )
+
+            // Add subtle dark overlay for better text readability
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Color.Black.copy(alpha = 0.12f)
+                    )
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.MusicNote,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(32.dp)
-                        .offset(y = (-3).dp), // Move icon up by 4dp
-                    tint = MaterialTheme.colorScheme.primary
+                // Header with icon and progress
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Enhanced music note icon with glow effect
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(
+                                Color.White.copy(alpha = 0.25f),
+                                RoundedCornerShape(18.dp)
+                            )
+                            .shadow(
+                                elevation = 2.dp,
+                                shape = RoundedCornerShape(18.dp),
+                                ambientColor = Color.White.copy(alpha = 0.3f)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MusicNote,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = Color.White
+                        )
+                    }
+
+                    // Progress indicator (if there are performances)
+                    if (recentPerformances.isNotEmpty()) {
+                        ProgressIndicatorBadge(
+                            progress = progressData.averageScore,
+                            bestScore = progressData.bestScore
+                        )
+                    }
+                }
+
+                // File name with enhanced styling and subtle text shadow
+                Text(
+                    text = midiFile.name,
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        shadow = androidx.compose.ui.graphics.Shadow(
+                            color = Color.Black.copy(alpha = 0.5f),
+                            offset = androidx.compose.ui.geometry.Offset(1f, 1f),
+                            blurRadius = 2f
+                        )
+                    ),
+                    color = Color.White,
+                    textAlign = TextAlign.Start,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
                 )
 
-                // Progress indicator (if there are performances)
+                Spacer(modifier = Modifier.weight(1f))
+
+                // BPM info with enhanced styling and subtle glow
+                Surface(
+                    color = Color.White.copy(alpha = 0.25f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .shadow(
+                            elevation = 1.dp,
+                            shape = RoundedCornerShape(12.dp),
+                            ambientColor = Color.White.copy(alpha = 0.2f)
+                        )
+                ) {
+                    Text(
+                        text = midiFile.currentBpm?.let {
+                            stringResource(R.string.midi_bpm_format, it)
+                        } ?: stringResource(R.string.midi_bpm_unknown),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Medium,
+                            shadow = androidx.compose.ui.graphics.Shadow(
+                                color = Color.Black.copy(alpha = 0.3f),
+                                offset = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
+                                blurRadius = 1f
+                            )
+                        ),
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+
+                // Practice stats or import date with enhanced styling
                 if (recentPerformances.isNotEmpty()) {
-                    ProgressIndicatorBadge(
-                        progress = progressData.averageScore,
-                        bestScore = progressData.bestScore
+                    PracticeStatsSection(
+                        sessionCount = recentPerformances.size,
+                        lastPlayedTime = lastPlayedTime,
+                        trend = progressData.trend
+                    )
+                } else {
+                    // Show import date if no practice data
+                    Text(
+                        text = "Imported ${formatDate(midiFile.dateImported)}",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontWeight = FontWeight.Medium,
+                            shadow = androidx.compose.ui.graphics.Shadow(
+                                color = Color.Black.copy(alpha = 0.4f),
+                                offset = androidx.compose.ui.geometry.Offset(1f, 1f),
+                                blurRadius = 2f
+                            )
+                        ),
+                        color = Color.White.copy(alpha = 0.9f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
 
-            // File name
-            Text(
-                text = midiFile.name,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Start,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            // BPM info
-            Surface(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = MaterialTheme.shapes.small,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            ) {
-                Text(
-                    text = midiFile.currentBpm?.let {
-                        stringResource(R.string.midi_bpm_format, it)
-                    } ?: stringResource(R.string.midi_bpm_unknown),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            // Add recent activity indicator
+            if (hasRecentActivity) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .size(8.dp)
+                        .background(
+                            Color(0xFF4CAF50),
+                            CircleShape
+                        )
+                        .shadow(
+                            elevation = 2.dp,
+                            shape = CircleShape,
+                            ambientColor = Color(0xFF4CAF50).copy(alpha = 0.5f)
+                        )
                 )
             }
+        }
 
-            // Practice stats or import date
-            if (recentPerformances.isNotEmpty()) {
-                PracticeStatsSection(
-                    sessionCount = recentPerformances.size,
-                    lastPlayedTime = lastPlayedTime,
-                    trend = progressData.trend
-                )
-            } else {
-                // Show import date if no practice data
-                Text(
-                    text = "Imported ${formatDate(midiFile.dateImported)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
+        // Handle press state
+        LaunchedEffect(isPressed) {
+            if (isPressed) {
+                kotlinx.coroutines.delay(150)
+                isPressed = false
             }
         }
     }
@@ -178,35 +356,56 @@ fun ProgressIndicatorBadge(
     modifier: Modifier = Modifier
 ) {
     val progressColor = when {
-        progress >= 90 -> successAccentColor()
-        progress >= 75 -> WarmGold60
+        progress >= 90 -> Color.White
+        progress >= 75 -> WarmGold20
         progress >= 60 -> AccentRose.copy(alpha = 0.8f)
-        else -> MaterialTheme.colorScheme.outline
+        else -> Color.White.copy(alpha = 0.7f)
     }
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
     ) {
-        // Circular progress indicator
+        // Circular progress indicator with enhanced styling
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.size(36.dp)
+            modifier = Modifier.size(42.dp)
         ) {
+            // Background circle with glow
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Color.White.copy(alpha = 0.25f),
+                        RoundedCornerShape(21.dp)
+                    )
+                    .shadow(
+                        elevation = 2.dp,
+                        shape = RoundedCornerShape(21.dp),
+                        ambientColor = Color.White.copy(alpha = 0.3f)
+                    )
+            )
+
             CircularProgressIndicator(
                 progress = progress / 100f,
                 modifier = Modifier.fillMaxSize(),
                 color = progressColor,
-                trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                trackColor = Color.White.copy(alpha = 0.3f),
                 strokeWidth = 3.dp
             )
 
             Text(
                 text = "$progress%",
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                color = progressColor
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    shadow = androidx.compose.ui.graphics.Shadow(
+                        color = Color.Black.copy(alpha = 0.5f),
+                        offset = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
+                        blurRadius = 1f
+                    )
+                ),
+                color = Color.White
             )
         }
 
@@ -214,9 +413,15 @@ fun ProgressIndicatorBadge(
         if (bestScore > progress) {
             Text(
                 text = "Best: $bestScore%",
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = 8.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 8.sp,
+                    shadow = androidx.compose.ui.graphics.Shadow(
+                        color = Color.Black.copy(alpha = 0.5f),
+                        offset = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
+                        blurRadius = 1f
+                    )
+                ),
+                color = Color.White.copy(alpha = 0.9f)
             )
         }
     }
@@ -240,49 +445,87 @@ fun PracticeStatsSection(
         ) {
             Text(
                 text = "$sessionCount session${if (sessionCount != 1) "s" else ""}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = FontWeight.Medium,
+                    shadow = androidx.compose.ui.graphics.Shadow(
+                        color = Color.Black.copy(alpha = 0.5f),
+                        offset = androidx.compose.ui.geometry.Offset(1f, 1f),
+                        blurRadius = 2f
+                    )
+                ),
+                color = Color.White.copy(alpha = 0.95f)
             )
 
-            // Trend indicator
+            // Trend indicator with enhanced glow effect
             if (trend != ProgressTrend.STABLE) {
                 Spacer(modifier = Modifier.width(4.dp))
-                Icon(
-                    imageVector = when (trend) {
-                        ProgressTrend.IMPROVING -> Icons.Default.PlayArrow
-                        ProgressTrend.DECLINING -> Icons.Default.PlayArrow
-                        ProgressTrend.STABLE -> Icons.Default.PlayArrow // Won't be shown
-                    },
-                    contentDescription = "Trend",
-                    tint = when (trend) {
-                        ProgressTrend.IMPROVING -> successAccentColor()
-                        ProgressTrend.DECLINING -> AccentRose
-                        ProgressTrend.STABLE -> Color.Gray
-                    },
+
+                Box(
                     modifier = Modifier
-                        .size(12.dp)
-                        .then(
-                            if (trend == ProgressTrend.DECLINING) {
-                                Modifier.graphicsLayer(rotationZ = 180f)
-                            } else Modifier
+                        .size(16.dp)
+                        .background(
+                            when (trend) {
+                                ProgressTrend.IMPROVING -> Color(0xFF4CAF50).copy(alpha = 0.2f)
+                                ProgressTrend.DECLINING -> Color(0xFFF44336).copy(alpha = 0.2f)
+                                ProgressTrend.STABLE -> Color.Transparent
+                            },
+                            CircleShape
                         )
-                )
+                        .shadow(
+                            elevation = if (trend != ProgressTrend.STABLE) 1.dp else 0.dp,
+                            shape = CircleShape,
+                            ambientColor = when (trend) {
+                                ProgressTrend.IMPROVING -> Color(0xFF4CAF50).copy(alpha = 0.3f)
+                                ProgressTrend.DECLINING -> Color(0xFFF44336).copy(alpha = 0.3f)
+                                ProgressTrend.STABLE -> Color.Transparent
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = when (trend) {
+                            ProgressTrend.IMPROVING -> Icons.Default.PlayArrow
+                            ProgressTrend.DECLINING -> Icons.Default.PlayArrow
+                            ProgressTrend.STABLE -> Icons.Default.PlayArrow
+                        },
+                        contentDescription = "Trend",
+                        tint = when (trend) {
+                            ProgressTrend.IMPROVING -> Color(0xFF4CAF50)
+                            ProgressTrend.DECLINING -> Color(0xFFF44336)
+                            ProgressTrend.STABLE -> Color.Gray
+                        },
+                        modifier = Modifier
+                            .size(12.dp)
+                            .then(
+                                if (trend == ProgressTrend.DECLINING) {
+                                    Modifier.graphicsLayer(rotationZ = 180f)
+                                } else Modifier
+                            )
+                    )
+                }
             }
         }
 
-        // Last played time
+        // Last played time with enhanced styling
         lastPlayedTime?.let { timestamp ->
             Text(
                 text = "Last played ${formatRelativeTime(timestamp)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 11.sp,
+                    shadow = androidx.compose.ui.graphics.Shadow(
+                        color = Color.Black.copy(alpha = 0.5f),
+                        offset = androidx.compose.ui.geometry.Offset(1f, 1f),
+                        blurRadius = 2f
+                    )
+                ),
+                color = Color.White.copy(alpha = 0.85f),
                 textAlign = TextAlign.Center
             )
         }
     }
 }
 
-// Data classes and helper functions
+// Data classes and helper functions (unchanged)
 data class ProgressData(
     val averageScore: Int,
     val bestScore: Int,
