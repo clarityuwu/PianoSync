@@ -200,10 +200,16 @@ fun NoteFallVisualizer(
 
     LaunchedEffect(currentTimeMs, pressedKeys, isPlaying) {
         if (isPlaying) {
-            // Find notes that are currently at the play line (using the offset)
+            // Find notes that are currently at the play line (NO offset for input timing)
             val notesAtPlayLine = notes.filter { note ->
-                val playbackTime = (note.startTime / speedRatio).toLong() + PLAYBACK_OFFSET_MS
-                val timeDiff = currentTimeMs - playbackTime
+                val notePlaybackTime = (note.startTime / speedRatio).toLong()
+                val timeDiff = currentTimeMs - notePlaybackTime
+
+                // Simple timing log for notes at play line
+                if (timeDiff in 0..CORRECT_NOTE_WINDOW && note !in processedNotes.value) {
+                    Log.d("NoteTiming", "Note ${getNoteNameForMidiNote(note.note)} - Expected: ${notePlaybackTime}ms, Current: ${currentTimeMs}ms, Diff: ${timeDiff}ms")
+                }
+
                 timeDiff in 0..CORRECT_NOTE_WINDOW && // Within the correct timing window
                         note !in processedNotes.value // Not already processed
             }
@@ -218,14 +224,17 @@ fun NoteFallVisualizer(
                     if (note.note in pressedKeys) {
                         // Note was correctly played!
                         correctlyPlayedNotes.value = correctlyPlayedNotes.value + note.note
+                        Log.d("NoteTiming", "✅ ${getNoteNameForMidiNote(note.note)} HIT")
+                    } else {
+                        Log.d("NoteTiming", "❌ ${getNoteNameForMidiNote(note.note)} MISSED")
                     }
                 }
             }
 
-            // Also check for notes that have passed the play line without being played
+            // Also check for notes that have passed the play line without being played (NO offset)
             val passedNotes = notes.filter { note ->
-                val playbackTime = (note.startTime / speedRatio).toLong() + PLAYBACK_OFFSET_MS
-                val timeDiff = currentTimeMs - playbackTime
+                val notePlaybackTime = (note.startTime / speedRatio).toLong()
+                val timeDiff = currentTimeMs - notePlaybackTime
                 timeDiff > CORRECT_NOTE_WINDOW && // Past the correct timing window
                         note !in processedNotes.value // Not already processed
             }
