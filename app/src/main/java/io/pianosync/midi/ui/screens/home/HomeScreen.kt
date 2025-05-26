@@ -23,8 +23,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import io.pianosync.midi.data.manager.MidiConnectionManager
 import io.pianosync.midi.data.model.MidiFile
+import io.pianosync.midi.data.model.PerformanceRecord
 import io.pianosync.midi.data.parser.MidiParser
 import io.pianosync.midi.data.repository.MidiFileRepository
+import io.pianosync.midi.data.repository.PerformanceRepository
 import io.pianosync.midi.ui.screens.home.components.ImportCard
 import io.pianosync.midi.ui.screens.home.components.MidiFileCard
 import kotlinx.coroutines.launch
@@ -33,16 +35,18 @@ import kotlinx.coroutines.launch
 @Composable
 fun HomeScreen(
     onNavigateToPlayer: (MidiFile) -> Unit,
-    onNavigateToProgress: () -> Unit, // Add this parameter
-    onNavigateToSettings: () -> Unit, // Add this parameter
+    onNavigateToProgress: () -> Unit,
+    onNavigateToSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val repository = remember(context) { MidiFileRepository(context) }
+    val performanceRepository = remember(context) { PerformanceRepository(context) }
     val midiManager = remember { MidiConnectionManager.getInstance(context) }
     val coroutineScope = rememberCoroutineScope()
 
     var midiFiles by remember { mutableStateOf<List<MidiFile>>(emptyList()) }
+    var performanceData by remember { mutableStateOf<Map<String, List<PerformanceRecord>>>(emptyMap()) }
     var showConnectionDialog by remember { mutableStateOf(false) }
     var selectedMidiFile by remember { mutableStateOf<MidiFile?>(null) }
 
@@ -58,6 +62,19 @@ fun HomeScreen(
     LaunchedEffect(repository) {
         repository.midiFiles.collect { files ->
             midiFiles = files
+        }
+    }
+
+    // Load performance data for all files
+    LaunchedEffect(performanceRepository) {
+        performanceRepository.performanceHistory.collect { allPerformances ->
+            // Group performances by MIDI file path and take recent ones
+            performanceData = allPerformances
+                .groupBy { it.midiFilePath }
+                .mapValues { (_, performances) ->
+                    // Sort by timestamp (newest first) and take last 5
+                    performances.sortedByDescending { it.timestamp }.take(5)
+                }
         }
     }
 
@@ -179,8 +196,12 @@ fun HomeScreen(
             }
 
             items(midiFiles) { midiFile ->
+                // Get performance data for this specific file
+                val filePerformances = performanceData[midiFile.path] ?: emptyList()
+
                 MidiFileCard(
                     midiFile = midiFile,
+                    recentPerformances = filePerformances, // Pass performance data
                     onClick = {
                         if (effectivelyConnected) {
                             onNavigateToPlayer(midiFile)

@@ -27,13 +27,14 @@ fun ImportCard(
 ) {
     Card(
         modifier = modifier
-            .width(160.dp)
-            .height(200.dp),
+            .width(180.dp)  // Updated to match MidiFileCard
+            .height(220.dp), // Updated to match MidiFileCard
         onClick = onImportClick,
         colors = CardDefaults.cardColors(
             containerColor = cardBackgroundColor(),
             contentColor = cardContentColor()
-        )
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
             modifier = Modifier
