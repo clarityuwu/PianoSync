@@ -48,8 +48,17 @@ import io.pianosync.midi.data.repository.MidiRecordingRepository
 import io.pianosync.midi.data.repository.PerformanceRepository
 import io.pianosync.midi.data.repository.SettingsRepository
 import io.pianosync.midi.data.model.AppSettings
+import io.pianosync.midi.data.model.DifficultyLevel
 import io.pianosync.midi.ui.screens.player.components.LoopControl
 import io.pianosync.midi.ui.screens.player.components.MetronomeVisualizer
+import io.pianosync.midi.ui.theme.AccentRose
+import io.pianosync.midi.ui.theme.RoyalPurple40
+import io.pianosync.midi.ui.theme.WarmGold60
+import io.pianosync.midi.ui.theme.WarmGold80
+import io.pianosync.midi.ui.theme.highlightAccentColor
+import io.pianosync.midi.ui.theme.leftHandNoteColor
+import io.pianosync.midi.ui.theme.rightHandNoteColor
+import io.pianosync.midi.ui.theme.successAccentColor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -247,18 +256,18 @@ fun NoteFallVisualizer(
 
     Box(
         modifier = modifier
-            .background(Color(0xFF1A1A1A))
+            .background(MaterialTheme.colorScheme.background) // Use theme background
             .width(totalWidth)
             .horizontalScroll(rememberScrollState())
     ) {
-        // Play line
+        // Play line with theme accent
         Box(
             modifier = Modifier
                 .offset(y = playLinePosition)
                 .fillMaxWidth()
                 .height(2.dp)
                 .background(
-                    color = Color.White.copy(alpha = 0.7f),
+                    color = highlightAccentColor(), // Use theme accent
                     shape = RoundedCornerShape(2.dp)
                 )
         )
@@ -287,9 +296,9 @@ fun NoteFallVisualizer(
                         .height(noteHeightPx.dp)
                         .background(
                             color = if (!note.isLeftHand) {
-                                if (isBlackKey) Color(0xFFE91E63) else Color(0xFFE91E63)
+                                rightHandNoteColor() // Use theme color instead of hardcoded
                             } else {
-                                if (isBlackKey) Color(0xFF2196F3) else Color(0xFF2196F3)
+                                leftHandNoteColor() // Use theme color instead of hardcoded
                             },
                             shape = RoundedCornerShape(2.dp)
                         )
@@ -826,13 +835,12 @@ fun MidiPlayerScreen(
                                     )
                                 }
 
-                                // Difficulty indicator
                                 Surface(
                                     color = when(settings.difficultyLevel) {
-                                        io.pianosync.midi.data.model.DifficultyLevel.EASY -> Color(0xFF4CAF50)
-                                        io.pianosync.midi.data.model.DifficultyLevel.MEDIUM -> Color(0xFFFF9800)
-                                        io.pianosync.midi.data.model.DifficultyLevel.HARD -> Color(0xFFF44336)
-                                        io.pianosync.midi.data.model.DifficultyLevel.EXPERT -> Color(0xFF9C27B0)
+                                        DifficultyLevel.EASY -> successAccentColor()
+                                        DifficultyLevel.MEDIUM -> WarmGold60
+                                        DifficultyLevel.HARD -> AccentRose
+                                        DifficultyLevel.EXPERT -> RoyalPurple40
                                     },
                                     shape = RoundedCornerShape(8.dp)
                                 ) {
@@ -1175,7 +1183,13 @@ fun MidiPlayerScreen(
                                             .padding(vertical = 4.dp)
                                             .clip(CircleShape)
                                             .background(
-                                                color = MaterialTheme.colorScheme.primary
+                                                color = when(score.value) {
+                                                    in 90..100 -> successAccentColor()
+                                                    in 80..89 -> WarmGold60
+                                                    in 70..79 -> WarmGold80
+                                                    in 60..69 -> AccentRose.copy(alpha = 0.7f)
+                                                    else -> MaterialTheme.colorScheme.error
+                                                }
                                             ),
                                         contentAlignment = Alignment.Center
                                     ) {
@@ -1444,7 +1458,7 @@ fun MidiPlayerScreen(
                         contentAlignment = Alignment.TopEnd
                     ) {
                         Surface(
-                            color = Color.Red.copy(alpha = 0.9f),
+                            color = AccentRose.copy(alpha = 0.9f), // Use theme accent instead of hardcoded red
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.padding(8.dp)
                         ) {
@@ -1737,8 +1751,8 @@ fun EnhancedWhiteKey(
 
     val animatedColor by animateColorAsState(
         targetValue = when {
-            isPhysicallyPressed -> Color(0xFFE0E0E0) // Soft gray for physical press
-            else -> Color.White // Default white
+            isPhysicallyPressed -> MaterialTheme.colorScheme.outline
+            else -> MaterialTheme.colorScheme.onBackground
         },
         animationSpec = tween(durationMillis = 50)
     )
@@ -1806,8 +1820,8 @@ fun EnhancedBlackKey(
 
     val animatedColor by animateColorAsState(
         targetValue = when {
-            isPhysicallyPressed -> Color(0xFF424242) // Darker gray for physical press
-            else -> Color(0xFF202020) // Default dark color
+            isPhysicallyPressed -> MaterialTheme.colorScheme.surfaceVariant
+            else -> MaterialTheme.colorScheme.surface
         },
         animationSpec = tween(durationMillis = 50)
     )
