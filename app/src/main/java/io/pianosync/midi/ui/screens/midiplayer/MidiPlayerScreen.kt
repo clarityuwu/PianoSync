@@ -30,6 +30,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -64,6 +65,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
+import io.pianosync.midi.R
 
 /**
  * Get the note name for a MIDI note number
@@ -760,9 +762,9 @@ fun MidiPlayerScreen(
                                         Spacer(modifier = Modifier.width(2.dp))
                                         Text(
                                             text = when (currentHandMode) {
-                                                HandMode.BOTH_HANDS -> "Both"
-                                                HandMode.LEFT_HAND_ONLY -> "Left"
-                                                HandMode.RIGHT_HAND_ONLY -> "Right"
+                                                HandMode.BOTH_HANDS -> stringResource(R.string.both)
+                                                HandMode.LEFT_HAND_ONLY -> stringResource(R.string.left)
+                                                HandMode.RIGHT_HAND_ONLY -> stringResource(R.string.right)
                                             },
                                             style = MaterialTheme.typography.labelSmall
                                         )
@@ -773,50 +775,48 @@ fun MidiPlayerScreen(
                                         onDismissRequest = { handMenuExpanded = false }
                                     ) {
                                         DropdownMenuItem(
-                                            text = { Text("Both Hands") },
+                                            text = { Text(stringResource(R.string.both_hands)) },
                                             onClick = {
                                                 currentHandMode = HandMode.BOTH_HANDS
                                                 handMenuExpanded = false
                                                 // Reset and restart playback with the new hand mode
-                                                playbackManager.resetPlayback() // Stop and cleanup any old temp file
+                                                playbackManager.resetPlayback()
                                                 playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
                                             },
                                             leadingIcon = {
                                                 Icon(
                                                     Icons.Default.PanoramaHorizontal,
-                                                    contentDescription = "Both Hands"
+                                                    contentDescription = stringResource(R.string.both_hands)
                                                 )
                                             }
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("Left Hand") },
+                                            text = { Text(stringResource(R.string.left_hand)) },
                                             onClick = {
                                                 currentHandMode = HandMode.LEFT_HAND_ONLY
                                                 handMenuExpanded = false
-                                                // Reset and restart playback with the new hand mode
                                                 playbackManager.resetPlayback()
                                                 playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
                                             },
                                             leadingIcon = {
                                                 Icon(
                                                     Icons.Default.SwipeLeft,
-                                                    contentDescription = "Left Hand"
+                                                    contentDescription = stringResource(R.string.left_hand)
                                                 )
                                             }
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("Right Hand") },
+                                            text = { Text(stringResource(R.string.right_hand)) },
                                             onClick = {
                                                 currentHandMode = HandMode.RIGHT_HAND_ONLY
                                                 handMenuExpanded = false
-                                                // Reset and restart playback with the new hand mode
                                                 playbackManager.resetPlayback()
                                                 playbackManager.startPlayback(midiFile, currentBpm ?: 120, 0L, midiNotes, currentHandMode)
                                             },
                                             leadingIcon = {
                                                 Icon(
                                                     Icons.Default.SwipeRight,
-                                                    contentDescription = "Right Hand"
+                                                    contentDescription = stringResource(R.string.right_hand)
                                                 )
                                             }
                                         )
@@ -875,17 +875,14 @@ fun MidiPlayerScreen(
                                         }
                                     }
                             ) {
-                                // Recording button
                                 IconButton(
                                     onClick = {
                                         lastInteractionTime = System.currentTimeMillis()
                                         if (isRecording) {
-                                            // Stop recording manually
                                             recordingManager.stopRecording()
                                             isRecording = false
                                             Log.d("MidiPlayer", "Stopped recording manually")
                                         } else {
-                                            // Start recording manually (only if piano is connected)
                                             if (isConnected) {
                                                 recordingManager.startRecording()
                                                 isRecording = true
@@ -893,11 +890,11 @@ fun MidiPlayerScreen(
                                             }
                                         }
                                     },
-                                    enabled = isConnected  // Only enable if piano is connected
+                                    enabled = isConnected
                                 ) {
                                     Icon(
                                         imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
-                                        contentDescription = if (isRecording) "Stop Recording" else "Start Recording",
+                                        contentDescription = if (isRecording) stringResource(R.string.stop_recording) else stringResource(R.string.start_recording),
                                         tint = when {
                                             !isConnected -> Color.Gray
                                             isRecording -> Color.Red
@@ -906,7 +903,6 @@ fun MidiPlayerScreen(
                                     )
                                 }
 
-                                // Metronome button
                                 TextButton(
                                     onClick = {
                                         lastInteractionTime = System.currentTimeMillis()
@@ -925,7 +921,7 @@ fun MidiPlayerScreen(
                                 ) {
                                     Icon(
                                         Icons.Default.Timer,
-                                        contentDescription = "Metronome",
+                                        contentDescription = stringResource(R.string.metronome),
                                         modifier = Modifier.size(20.dp),
                                         tint = if (metronomeEnabled) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.6f)
                                     )
@@ -983,11 +979,9 @@ fun MidiPlayerScreen(
                                     onClick = {
                                         lastInteractionTime = System.currentTimeMillis()
                                         if (isPlaybackActive) {
-                                            // User manually paused
                                             wasManuallyPaused = true
                                             playbackManager.pausePlayback()
                                         } else {
-                                            // User resumed or started playback
                                             wasManuallyPaused = false
                                             if (currentTimeMs > 0) {
                                                 playbackManager.resumePlayback(midiFile)
@@ -1001,7 +995,7 @@ fun MidiPlayerScreen(
                                         imageVector = if (isPlaybackActive)
                                             Icons.Default.Pause else Icons.Default.PlayArrow,
                                         contentDescription = if (isPlaybackActive)
-                                            "Pause" else "Play"
+                                            stringResource(R.string.pause) else stringResource(R.string.play)
                                     )
                                 }
                             }
@@ -1141,13 +1135,12 @@ fun MidiPlayerScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
-                                    text = "Performance Results",
+                                    text = stringResource(R.string.performance_results),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(bottom = 8.dp)
                                 )
 
-                                // Show recording status if recorded
                                 if (recordingManager.getRecordingDuration() > 0) {
                                     Surface(
                                         color = MaterialTheme.colorScheme.primaryContainer,
@@ -1160,13 +1153,13 @@ fun MidiPlayerScreen(
                                         ) {
                                             Icon(
                                                 Icons.Default.Mic,
-                                                contentDescription = "Recording",
+                                                contentDescription = stringResource(R.string.recording),
                                                 tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(16.dp)
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
-                                                text = "MIDI performance recorded! (${formatRecordingTime(recordingManager.getRecordingDuration())})",
+                                                text = stringResource(R.string.recording_saved_format, formatRecordingTime(recordingManager.getRecordingDuration())),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.primary
                                             )
@@ -1180,7 +1173,7 @@ fun MidiPlayerScreen(
                                         modifier = Modifier.padding(16.dp)
                                     )
                                     Text(
-                                        text = "Saving your progress...",
+                                        text = stringResource(R.string.saving_progress),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -1212,25 +1205,24 @@ fun MidiPlayerScreen(
 
                                     Spacer(modifier = Modifier.height(8.dp))
 
-                                    // Statistics row
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceEvenly
                                     ) {
                                         CompactStatisticItem(
-                                            label = "Notes Hit",
+                                            label = stringResource(R.string.notes_hit),
                                             value = "${correctlyPlayedNotes.value.size}",
                                             modifier = Modifier.weight(1f)
                                         )
 
                                         CompactStatisticItem(
-                                            label = "Notes Missed",
+                                            label = stringResource(R.string.notes_missed),
                                             value = "${missedNotes.value.size}",
                                             modifier = Modifier.weight(1f)
                                         )
 
                                         CompactStatisticItem(
-                                            label = "Total",
+                                            label = stringResource(R.string.total),
                                             value = "$totalNotesInSong",
                                             modifier = Modifier.weight(1f)
                                         )
@@ -1358,12 +1350,12 @@ fun MidiPlayerScreen(
                                         ) {
                                             Icon(
                                                 Icons.Default.Refresh,
-                                                contentDescription = "Retry",
+                                                contentDescription = stringResource(R.string.try_again),
                                                 modifier = Modifier.size(16.dp)
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
-                                                "Try Again",
+                                                stringResource(R.string.try_again),
                                                 style = MaterialTheme.typography.bodyMedium
                                             )
                                         }
@@ -1443,12 +1435,12 @@ fun MidiPlayerScreen(
                                         ) {
                                             Icon(
                                                 Icons.Default.ArrowBack,
-                                                contentDescription = "Back to Library",
+                                                contentDescription = stringResource(R.string.back_to_library),
                                                 modifier = Modifier.size(16.dp)
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
-                                                "Back",
+                                                stringResource(R.string.back),
                                                 style = MaterialTheme.typography.bodyMedium
                                             )
                                         }
@@ -1467,7 +1459,7 @@ fun MidiPlayerScreen(
                         contentAlignment = Alignment.TopEnd
                     ) {
                         Surface(
-                            color = AccentRose.copy(alpha = 0.9f), // Use theme accent instead of hardcoded red
+                            color = AccentRose.copy(alpha = 0.9f),
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.padding(8.dp)
                         ) {
@@ -1480,20 +1472,20 @@ fun MidiPlayerScreen(
                                 ) {
                                     Icon(
                                         Icons.Default.FiberManualRecord,
-                                        contentDescription = "Recording",
+                                        contentDescription = stringResource(R.string.recording),
                                         tint = Color.White,
                                         modifier = Modifier.size(12.dp)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "REC ${formatRecordingTime(recordingDuration)}",
+                                        text = stringResource(R.string.rec_format, formatRecordingTime(recordingDuration)),
                                         color = Color.White,
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
                                 Text(
-                                    text = "Auto-stops at song end",
+                                    text = stringResource(R.string.auto_stops_at_song_end),
                                     color = Color.White.copy(alpha = 0.8f),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontSize = 10.sp
@@ -1616,11 +1608,11 @@ fun MidiPlayerScreen(
             var tempBpm by remember { mutableStateOf(currentBpm?.toString() ?: "") }
             AlertDialog(
                 onDismissRequest = { showBpmDialog = false },
-                title = { Text("Set BPM") },
+                title = { Text(stringResource(R.string.set_bpm)) },
                 text = {
                     Column {
                         Text(
-                            "Original BPM: ${midiFile.originalBpm ?: "Unknown"}",
+                            stringResource(R.string.original_bpm, midiFile.originalBpm?.toString() ?: stringResource(R.string.bmp_unknown)),
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
@@ -1631,7 +1623,7 @@ fun MidiPlayerScreen(
                                     tempBpm = newValue
                                 }
                             },
-                            label = { Text("Current BPM") },
+                            label = { Text(stringResource(R.string.current_bpm)) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                         )
                     }
@@ -1648,19 +1640,17 @@ fun MidiPlayerScreen(
                                 }
                                 playbackManager.resetPlayback()
                                 playbackManager.startPlayback(midiFile.copy(currentBpm = newBpm), newBpm, 0L, midiNotes, currentHandMode)
-
-                                // Add this line to update metronome:
                                 metronomeManager.updateBpm(newBpm)
                             }
                             showBpmDialog = false
                         }
                     ) {
-                        Text("Save")
+                        Text(stringResource(R.string.save))
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showBpmDialog = false }) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.cancel))
                     }
                 }
             )

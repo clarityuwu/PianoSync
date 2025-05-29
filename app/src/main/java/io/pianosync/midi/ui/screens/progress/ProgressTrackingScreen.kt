@@ -19,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -38,329 +39,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
-
-@Composable
-fun MidiRecordingCard(
-    recording: MidiRecording,
-    recordingRepository: MidiRecordingRepository, // Add this parameter
-    onPlay: () -> Unit,
-    onSave: () -> Unit,
-    onDelete: () -> Unit
-) {
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (recording.isSaved) recording.title else "Recording",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Medium
-                    )
-
-                    Text(
-                        text = formatDateTime(recording.timestamp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                if (recording.isSaved) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(
-                            text = "SAVED",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Recording stats
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Duration: ${formatDuration(recording.durationMs)}",
-                    style = MaterialTheme.typography.bodySmall
-                )
-
-                Text(
-                    text = "${recording.bpm} BPM • ${recording.handMode.name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }}",
-                    style = MaterialTheme.typography.bodySmall
-                )
-
-                recording.score?.let { score ->
-                    Text(
-                        text = "Score: $score%",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = getScoreColor(score)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onPlay,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Icon(
-                        Icons.Default.PlayArrow,
-                        contentDescription = "Play",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Play")
-                }
-
-                if (!recording.isSaved) {
-                    OutlinedButton(
-                        onClick = onSave,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            Icons.Default.Save,
-                            contentDescription = "Save",
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Save")
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                val exportedFile = recordingRepository.exportRecordingAsMidiFile(
-                                    context = context,
-                                    recording = recording,
-                                    fileName = "${recording.displayName}.mid"
-                                )
-
-                                exportedFile?.let { file ->
-                                    android.util.Log.d("Export", "Recording exported to: ${file.absolutePath}")
-
-                                    // Show toast with the export directory
-                                    val exportDirectory = file.parentFile?.absolutePath ?: "Unknown location"
-                                    Toast.makeText(
-                                        context,
-                                        "Recording exported to:\n$exportDirectory",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                } ?: run {
-                                    // Show error toast if export failed
-                                    Toast.makeText(
-                                        context,
-                                        "Failed to export recording",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            }
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            Icons.Default.Download,
-                            contentDescription = "Export",
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Export")
-                    }
-                }
-
-                IconButton(onClick = onDelete) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = "Delete",
-                        tint = Color.Red
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun RecordingPlaybackDialog(
-    recording: MidiRecording,
-    playbackManager: RecordingPlaybackManager,
-    onDismiss: () -> Unit
-) {
-    val isPlaying by playbackManager.isPlaying.collectAsState()
-    val currentTime by playbackManager.currentTimeMs.collectAsState()
-    val pressedKeys by playbackManager.pressedKeys.collectAsState()
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surface
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Text(
-                    text = "Play Recording",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = recording.displayName,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Progress bar
-                LinearProgressIndicator(
-                    progress = if (recording.durationMs > 0) {
-                        (currentTime.toFloat() / recording.durationMs.toFloat()).coerceIn(0f, 1f)
-                    } else 0f,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Time display
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = formatDuration(currentTime),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        text = formatDuration(recording.durationMs),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Playback controls
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    IconButton(
-                        onClick = { playbackManager.seekTo(0) }
-                    ) {
-                        Icon(Icons.Default.SkipPrevious, contentDescription = "Restart")
-                    }
-
-                    IconButton(
-                        onClick = {
-                            if (isPlaying) {
-                                playbackManager.pausePlayback()
-                            } else {
-                                if (currentTime > 0) {
-                                    playbackManager.resumePlayback()
-                                } else {
-                                    playbackManager.startPlayback(recording)
-                                }
-                            }
-                        }
-                    ) {
-                        Icon(
-                            if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "Pause" else "Play"
-                        )
-                    }
-
-                    IconButton(
-                        onClick = { playbackManager.stopPlayback() }
-                    ) {
-                        Icon(Icons.Default.Stop, contentDescription = "Stop")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Close button
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Close")
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun SaveRecordingDialog(
-    recording: MidiRecording,
-    title: String,
-    onTitleChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Save Recording") },
-        text = {
-            Column {
-                Text("Give your recording a name:")
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = onTitleChange,
-                    label = { Text("Recording title") },
-                    placeholder = { Text("My awesome performance") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = onSave,
-                enabled = title.isNotBlank()
-            ) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
+import io.pianosync.midi.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -413,20 +92,25 @@ fun ProgressTrackingScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Progress Tracking") },
+                title = { Text(stringResource(R.string.progress_tracking)) },
                 navigationIcon = {
                     IconButton(onClick = onBackPressed) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = stringResource(R.string.back)
+                        )
                     }
                 },
                 actions = {
-                    // Add refresh button
                     IconButton(
                         onClick = {
                             refreshTrigger++
                         }
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = stringResource(R.string.refresh)
+                        )
                     }
                 }
             )
@@ -474,10 +158,9 @@ fun ProgressTrackingScreen(
                         )
                     }
 
-                    // Show recent sessions for the selected file
                     item {
                         Text(
-                            text = "Recent Practice Sessions",
+                            text = stringResource(R.string.recent_practice_sessions),
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
@@ -500,7 +183,7 @@ fun ProgressTrackingScreen(
                     if (fileRecordings.isNotEmpty()) {
                         item {
                             Text(
-                                text = "MIDI Recordings (${fileRecordings.size})",
+                                text = stringResource(R.string.midi_recordings_format, fileRecordings.size),
                                 style = MaterialTheme.typography.titleMedium,
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
@@ -509,7 +192,7 @@ fun ProgressTrackingScreen(
                         items(fileRecordings.take(5)) { recording ->
                             MidiRecordingCard(
                                 recording = recording,
-                                recordingRepository = recordingRepository, // Add this line
+                                recordingRepository = recordingRepository,
                                 onPlay = { showRecordingDialog = recording },
                                 onSave = {
                                     if (!recording.isSaved) {
@@ -528,14 +211,14 @@ fun ProgressTrackingScreen(
                         }
                     } else {
                         item {
-                            EmptyStateMessage("No recordings yet for this piece. Start playing with a connected piano to record!")
+                            EmptyStateMessage(stringResource(R.string.no_recordings_yet))
                         }
                     }
                 } else {
                     // Show progress for all files
                     item {
                         Text(
-                            text = "All Files Summary",
+                            text = stringResource(R.string.all_files_summary), // Updated
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
@@ -549,7 +232,7 @@ fun ProgressTrackingScreen(
                     if (allRecordings.isNotEmpty()) {
                         item {
                             Text(
-                                text = "Recent Recordings (${allRecordings.size})",
+                                text = stringResource(R.string.recent_recordings_count_format, allRecordings.size),
                                 style = MaterialTheme.typography.titleMedium,
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
@@ -581,7 +264,6 @@ fun ProgressTrackingScreen(
         }
     }
 
-    // Recording playback dialog
     showRecordingDialog?.let { recording ->
         RecordingPlaybackDialog(
             recording = recording,
@@ -593,7 +275,6 @@ fun ProgressTrackingScreen(
         )
     }
 
-    // Save recording dialog
     recordingToSave?.let { recording ->
         SaveRecordingDialog(
             recording = recording,
@@ -615,163 +296,6 @@ fun ProgressTrackingScreen(
     }
 }
 
-@Composable
-fun OverallProgressSection(
-    performances: List<PerformanceRecord>,
-    modifier: Modifier = Modifier
-) {
-    // Calculate overall stats
-    val totalSessions = performances.size
-    val totalPieces = performances.map { it.midiFilePath }.distinct().size
-    val averageScore = if (performances.isNotEmpty()) {
-        performances.sumOf { it.score } / performances.size
-    } else 0
-    val totalNotesPlayed = performances.sumOf { it.notesHit + it.notesMissed }
-    val totalPlayTime = performances.sumOf { it.durationMs }
-    val recentTrend = calculateRecentTrend(performances)
-
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        ),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "Your Practice Progress",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                StatItem(
-                    icon = Icons.Default.MusicNote,
-                    value = totalPieces.toString(),
-                    label = "Pieces"
-                )
-
-                StatItem(
-                    icon = Icons.Default.History,
-                    value = totalSessions.toString(),
-                    label = "Sessions"
-                )
-
-                StatItem(
-                    icon = Icons.Default.Score,
-                    value = "$averageScore%",
-                    label = "Avg. Score"
-                )
-
-                StatItem(
-                    icon = Icons.Default.Timer,
-                    value = formatDuration(totalPlayTime),
-                    label = "Practice Time"
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Score progress chart for recent performances
-            if (performances.isNotEmpty()) {
-                val chartData = prepareChartData(performances)
-                ScoreProgressChart(chartData)
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Performance trend indicator
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.align(Alignment.End)
-                ) {
-                    Icon(
-                        imageVector = when {
-                            recentTrend > 0 -> Icons.Default.TrendingUp
-                            recentTrend < 0 -> Icons.Default.TrendingDown
-                            else -> Icons.Default.TrendingFlat
-                        },
-                        contentDescription = "Trend",
-                        tint = when {
-                            recentTrend > 0 -> Color(0xFF4CAF50)
-                            recentTrend < 0 -> Color(0xFFF44336)
-                            else -> Color.Gray
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    Text(
-                        text = when {
-                            recentTrend > 0 -> "+${recentTrend}% improvement"
-                            recentTrend < 0 -> "${recentTrend}% decline"
-                            else -> "No change"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-            } else {
-                EmptyStateMessage("No practice data yet. Start playing to see your progress!")
-            }
-        }
-    }
-}
-
-@Composable
-fun FileSelectionChips(
-    midiFiles: List<MidiFile>,
-    selectedFile: MidiFile?,
-    onFileSelected: (MidiFile?) -> Unit
-) {
-    Column {
-        Text(
-            text = "Select a piece to view details:",
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(vertical = 8.dp)
-        )
-
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            item {
-                FilterChip(
-                    selected = selectedFile == null,
-                    onClick = { onFileSelected(null) },
-                    label = { Text("All Pieces") },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.Album,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                )
-            }
-
-            items(midiFiles) { file ->
-                FilterChip(
-                    selected = selectedFile?.path == file.path,
-                    onClick = { onFileSelected(file) },
-                    label = { Text(file.name) },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.MusicNote,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                )
-            }
-        }
-    }
-}
 
 @Composable
 fun FilePerformanceDetails(
@@ -804,7 +328,7 @@ fun FilePerformanceDetails(
                     val bestScore = sortedPerformances.maxOfOrNull { it.score } ?: 0
                     FileStatItem(
                         value = "$bestScore%",
-                        label = "Best Score",
+                        label = stringResource(R.string.best_score), // Updated
                         color = getScoreColor(bestScore)
                     )
 
@@ -812,7 +336,7 @@ fun FilePerformanceDetails(
                     val recentScore = sortedPerformances.first().score
                     FileStatItem(
                         value = "$recentScore%",
-                        label = "Last Score",
+                        label = stringResource(R.string.last_score), // Updated
                         color = getScoreColor(recentScore)
                     )
 
@@ -820,7 +344,7 @@ fun FilePerformanceDetails(
                     val totalTime = sortedPerformances.sumOf { it.durationMs }
                     FileStatItem(
                         value = formatDuration(totalTime),
-                        label = "Practice Time",
+                        label = stringResource(R.string.practice_time), // Updated
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
@@ -833,7 +357,7 @@ fun FilePerformanceDetails(
                     ScoreProgressChart(chartData)
                 }
             } else {
-                EmptyStateMessage("No practice data yet for this piece.")
+                EmptyStateMessage(stringResource(R.string.no_practice_data_piece)) // Updated
             }
         }
     }
@@ -844,12 +368,11 @@ fun AllFilesSummary(
     performanceData: Map<String, List<PerformanceRecord>>,
     midiFiles: List<MidiFile>
 ) {
-    // Replace LazyColumn with Column to avoid nested scrollable containers
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         if (performanceData.isEmpty()) {
-            EmptyStateMessage("No practice data yet. Start playing to see your progress!")
+            EmptyStateMessage(stringResource(R.string.no_practice_data_start)) // Updated
         } else {
             midiFiles.forEach { midiFile ->
                 val filePerformances = performanceData[midiFile.path] ?: emptyList()
@@ -894,7 +417,7 @@ fun FileSummaryCard(
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "Best: $bestScore% / Last: $lastScore%",
+                            text = stringResource(R.string.best_last_scores_format, bestScore, lastScore), // Updated
                             style = MaterialTheme.typography.bodySmall
                         )
 
@@ -911,20 +434,19 @@ fun FileSummaryCard(
 
                     // Number of sessions
                     Text(
-                        text = "${performances.size} sessions, ${formatDuration(performances.sumOf { it.durationMs })} practice time",
+                        text = stringResource(R.string.sessions_practice_format, performances.size, formatDuration(performances.sumOf { it.durationMs })), // Updated
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
-                // Mini score graph
+                // Mini score graph remains the same
                 if (performances.size >= 2) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalAlignment = Alignment.Bottom,
                         modifier = Modifier.height(24.dp)
                     ) {
-                        // Last 5 sessions from oldest to newest
                         performances.asReversed().take(5).forEach { performance ->
                             val height = (performance.score / 100f) * 24f
 
@@ -973,7 +495,7 @@ fun PracticeSessionCard(performance: PerformanceRecord) {
                     modifier = Modifier.padding(start = 4.dp)
                 ) {
                     Text(
-                        text = "Score: ${performance.score}%",
+                        text = stringResource(R.string.score_percentage_format, performance.score), // Updated
                         color = Color.White,
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -990,29 +512,29 @@ fun PracticeSessionCard(performance: PerformanceRecord) {
             ) {
                 SessionStat(
                     value = performance.notesHit.toString(),
-                    label = "Notes Hit",
+                    label = stringResource(R.string.notes_hit), // Updated
                     color = Color(0xFF4CAF50)
                 )
 
                 SessionStat(
                     value = performance.notesMissed.toString(),
-                    label = "Missed",
+                    label = stringResource(R.string.missed), // Updated
                     color = Color(0xFFF44336)
                 )
 
                 SessionStat(
                     value = "${performance.bpm}",
-                    label = "BPM",
+                    label = stringResource(R.string.bpm), // Updated
                     color = Color(0xFF2196F3)
                 )
 
                 SessionStat(
                     value = when(performance.handMode) {
-                        HandMode.LEFT_HAND_ONLY -> "Left"
-                        HandMode.RIGHT_HAND_ONLY -> "Right"
-                        HandMode.BOTH_HANDS -> "Both"
+                        HandMode.LEFT_HAND_ONLY -> stringResource(R.string.left) // Updated
+                        HandMode.RIGHT_HAND_ONLY -> stringResource(R.string.right) // Updated
+                        HandMode.BOTH_HANDS -> stringResource(R.string.both) // Updated
                     },
-                    label = "Hand Mode",
+                    label = stringResource(R.string.hand_mode), // Updated
                     color = Color(0xFF9C27B0)
                 )
             }
@@ -1022,13 +544,13 @@ fun PracticeSessionCard(performance: PerformanceRecord) {
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Notes Played:",
+                    text = stringResource(R.string.notes_played_label), // Updated
                     style = MaterialTheme.typography.labelMedium
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                NotesPlayedVisualizer(performance.notesPlayed.take(100)) // Limit to avoid performance issues
+                NotesPlayedVisualizer(performance.notesPlayed.take(100))
             }
         }
     }
@@ -1236,3 +758,489 @@ private fun prepareChartData(performances: List<PerformanceRecord>): List<ScoreD
 }
 
 data class ScoreDataPoint(val date: String, val score: Float)
+
+
+@Composable
+fun MidiRecordingCard(
+    recording: MidiRecording,
+    recordingRepository: MidiRecordingRepository,
+    onPlay: () -> Unit,
+    onSave: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (recording.isSaved) recording.title else stringResource(R.string.recording),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Text(
+                        text = formatDateTime(recording.timestamp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                if (recording.isSaved) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.saved),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Recording stats
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = stringResource(R.string.duration_format, formatDuration(recording.durationMs)),
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                Text(
+                    text = stringResource(R.string.bpm_hand_mode_format, recording.bpm, getHandModeString(recording.handMode)),
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                recording.score?.let { score ->
+                    Text(
+                        text = stringResource(R.string.score_format, score),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = getScoreColor(score)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onPlay,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = stringResource(R.string.play),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(stringResource(R.string.play))
+                }
+
+                if (!recording.isSaved) {
+                    OutlinedButton(
+                        onClick = onSave,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            Icons.Default.Save,
+                            contentDescription = stringResource(R.string.save),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(stringResource(R.string.save))
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                val exportedFile = recordingRepository.exportRecordingAsMidiFile(
+                                    context = context,
+                                    recording = recording,
+                                    fileName = "${recording.displayName}.mid"
+                                )
+
+                                exportedFile?.let { file ->
+                                    val exportDirectory = file.parentFile?.absolutePath ?: "Unknown location"
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.recording_exported_format, exportDirectory),
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                } ?: run {
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.export_failed),
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            Icons.Default.Download,
+                            contentDescription = stringResource(R.string.export),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(stringResource(R.string.export))
+                    }
+                }
+
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = stringResource(R.string.delete),
+                        tint = Color.Red
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RecordingPlaybackDialog(
+    recording: MidiRecording,
+    playbackManager: RecordingPlaybackManager,
+    onDismiss: () -> Unit
+) {
+    val isPlaying by playbackManager.isPlaying.collectAsState()
+    val currentTime by playbackManager.currentTimeMs.collectAsState()
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.play_recording),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = recording.displayName,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Progress bar
+                LinearProgressIndicator(
+                    progress = if (recording.durationMs > 0) {
+                        (currentTime.toFloat() / recording.durationMs.toFloat()).coerceIn(0f, 1f)
+                    } else 0f,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Time display
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = formatDuration(currentTime),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        text = formatDuration(recording.durationMs),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Playback controls
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    IconButton(
+                        onClick = { playbackManager.seekTo(0) }
+                    ) {
+                        Icon(Icons.Default.SkipPrevious, contentDescription = stringResource(R.string.restart))
+                    }
+
+                    IconButton(
+                        onClick = {
+                            if (isPlaying) {
+                                playbackManager.pausePlayback()
+                            } else {
+                                if (currentTime > 0) {
+                                    playbackManager.resumePlayback()
+                                } else {
+                                    playbackManager.startPlayback(recording)
+                                }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isPlaying) stringResource(R.string.pause) else stringResource(R.string.play)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { playbackManager.stopPlayback() }
+                    ) {
+                        Icon(Icons.Default.Stop, contentDescription = stringResource(R.string.stop))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Close button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.close))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SaveRecordingDialog(
+    recording: MidiRecording,
+    title: String,
+    onTitleChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.save_recording)) },
+        text = {
+            Column {
+                Text(stringResource(R.string.give_recording_name))
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = onTitleChange,
+                    label = { Text(stringResource(R.string.recording_title)) },
+                    placeholder = { Text(stringResource(R.string.recording_placeholder)) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onSave,
+                enabled = title.isNotBlank()
+            ) {
+                Text(stringResource(R.string.save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
+}
+
+@Composable
+fun OverallProgressSection(
+    performances: List<PerformanceRecord>,
+    modifier: Modifier = Modifier
+) {
+    // Calculate overall stats
+    val totalSessions = performances.size
+    val totalPieces = performances.map { it.midiFilePath }.distinct().size
+    val averageScore = if (performances.isNotEmpty()) {
+        performances.sumOf { it.score } / performances.size
+    } else 0
+    val totalPlayTime = performances.sumOf { it.durationMs }
+    val recentTrend = calculateRecentTrend(performances)
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.your_practice_progress),
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                StatItem(
+                    icon = Icons.Default.MusicNote,
+                    value = totalPieces.toString(),
+                    label = stringResource(R.string.pieces)
+                )
+
+                StatItem(
+                    icon = Icons.Default.History,
+                    value = totalSessions.toString(),
+                    label = stringResource(R.string.sessions)
+                )
+
+                StatItem(
+                    icon = Icons.Default.Score,
+                    value = "$averageScore%",
+                    label = stringResource(R.string.avg_score)
+                )
+
+                StatItem(
+                    icon = Icons.Default.Timer,
+                    value = formatDuration(totalPlayTime),
+                    label = stringResource(R.string.practice_time)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Score progress chart for recent performances
+            if (performances.isNotEmpty()) {
+                val chartData = prepareChartData(performances)
+                ScoreProgressChart(chartData)
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Performance trend indicator
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Icon(
+                        imageVector = when {
+                            recentTrend > 0 -> Icons.Default.TrendingUp
+                            recentTrend < 0 -> Icons.Default.TrendingDown
+                            else -> Icons.Default.TrendingFlat
+                        },
+                        contentDescription = "Trend",
+                        tint = when {
+                            recentTrend > 0 -> Color(0xFF4CAF50)
+                            recentTrend < 0 -> Color(0xFFF44336)
+                            else -> Color.Gray
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    Text(
+                        text = when {
+                            recentTrend > 0 -> stringResource(R.string.improvement_format, recentTrend)
+                            recentTrend < 0 -> stringResource(R.string.decline_format, recentTrend)
+                            else -> stringResource(R.string.no_change)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            } else {
+                EmptyStateMessage(stringResource(R.string.no_practice_data_start))
+            }
+        }
+    }
+}
+
+@Composable
+fun FileSelectionChips(
+    midiFiles: List<MidiFile>,
+    selectedFile: MidiFile?,
+    onFileSelected: (MidiFile?) -> Unit
+) {
+    Column {
+        Text(
+            text = stringResource(R.string.select_piece_details),
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(vertical = 8.dp)
+        )
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item {
+                FilterChip(
+                    selected = selectedFile == null,
+                    onClick = { onFileSelected(null) },
+                    label = { Text(stringResource(R.string.all_pieces)) },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Album,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                )
+            }
+
+            items(midiFiles) { file ->
+                FilterChip(
+                    selected = selectedFile?.path == file.path,
+                    onClick = { onFileSelected(file) },
+                    label = { Text(file.name) },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.MusicNote,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                )
+            }
+        }
+    }
+}
+
+// Helper function to get localized hand mode string
+@Composable
+private fun getHandModeString(handMode: HandMode): String {
+    return when (handMode) {
+        HandMode.BOTH_HANDS -> stringResource(R.string.both)
+        HandMode.LEFT_HAND_ONLY -> stringResource(R.string.left)
+        HandMode.RIGHT_HAND_ONLY -> stringResource(R.string.right)
+    }
+}

@@ -1,19 +1,207 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- res/values/strings.xml -->
 <resources>
+    <!-- App Name -->
     <string name="app_name">PianoSync</string>
 
-    <!-- Import Card -->
-    <string name="import_midi_title">Import MIDI File</string>
-    <string name="import_midi_description">Import MIDI</string>
-
-    <!-- MIDI File Card -->
+    <!-- Home Screen -->
+    <string name="import_midi_title">Import MIDI</string>
+    <string name="import_midi_description">Import MIDI file</string>
     <string name="midi_bpm_format">%1$d BPM</string>
-    <string name="midi_bpm_unknown"> BPM</string>
+    <string name="midi_bpm_unknown">BPM Unknown</string>
 
     <!-- Delete Dialog -->
-    <string name="delete_dialog_title">Delete MIDI File</string>
-    <string name="delete_dialog_message">Do you want to remove "%1$s" from the list?</string>
+    <string name="delete_dialog_title">Delete File</string>
+    <string name="delete_dialog_message">Are you sure you want to delete %1$s?</string>
     <string name="delete_dialog_confirm">Delete</string>
     <string name="delete_dialog_cancel">Cancel</string>
+
+    <!-- Navigation -->
+    <string name="back">Back</string>
+    <string name="settings">Settings</string>
+    <string name="progress_tracking">Progress Tracking</string>
+    <string name="refresh">Refresh</string>
+
+    <!-- Hand Modes -->
+    <string name="both_hands">Both Hands</string>
+    <string name="left_hand">Left Hand</string>
+    <string name="right_hand">Right Hand</string>
+    <string name="both">Both</string>
+    <string name="left">Left</string>
+    <string name="right">Right</string>
+
+    <!-- Playback Controls -->
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+    <string name="stop">Stop</string>
+    <string name="restart">Restart</string>
+    <string name="record">Record</string>
+    <string name="start_recording">Start Recording</string>
+    <string name="stop_recording">Stop Recording</string>
+
+    <!-- Metronome -->
+    <string name="metronome">Metronome</string>
+    <string name="toggle_loop">Toggle Loop</string>
+
+    <!-- BPM Dialog -->
+    <string name="set_bpm">Set BPM</string>
+    <string name="original_bpm">Original BPM: %1$s</string>
+    <string name="current_bpm">Current BPM</string>
+    <string name="bmp_unknown">Unknown</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- Performance Results -->
+    <string name="performance_results">Performance Results</string>
+    <string name="notes_hit">Notes Hit</string>
+    <string name="notes_missed">Notes Missed</string>
+    <string name="total">Total</string>
+    <string name="grade_format">Grade: %1$s</string>
+    <string name="keep_practicing">Keep practicing!</string>
+    <string name="try_again">Try Again</string>
+    <string name="back_to_library">Back to Library</string>
+    <string name="saving_progress">Saving your progress...</string>
+
+    <!-- Grades -->
+    <string name="grade_a_plus">A+</string>
+    <string name="grade_a">A</string>
+    <string name="grade_b_plus">B+</string>
+    <string name="grade_b">B</string>
+    <string name="grade_c_plus">C+</string>
+    <string name="grade_c">C</string>
+    <string name="grade_d">D</string>
+
+    <!-- Recording -->
+    <string name="rec_format">REC %1$s</string>
+    <string name="auto_stops_at_song_end">Auto-stops at song end</string>
+    <string name="recording_saved_format">MIDI performance recorded! (%1$s)</string>
+
+    <!-- Connection Status -->
+    <string name="piano_connected">Piano Connected</string>
+    <string name="piano_disconnected">Piano Disconnected</string>
+    <string name="waiting_for_piano">Waiting for piano to connect...</string>
+    <string name="connect_piano_message">Please connect your piano to play %1$s</string>
+    <string name="test_mode">Test Mode</string>
+    <string name="dismiss">Dismiss</string>
+
+    <!-- Progress Screen -->
+    <string name="your_practice_progress">Your Practice Progress</string>
+    <string name="pieces">Pieces</string>
+    <string name="sessions">Sessions</string>
+    <string name="avg_score">Avg. Score</string>
+    <string name="practice_time">Practice Time</string>
+    <string name="score_progress">Score Progress</string>
+    <string name="improvement_format">+%1$d%% improvement</string>
+    <string name="decline_format">%1$d%% decline</string>
+    <string name="no_change">No change</string>
+
+    <!-- File Selection -->
+    <string name="select_piece_details">Select a piece to view details:</string>
+    <string name="all_pieces">All Pieces</string>
+
+    <!-- Performance Stats -->
+    <string name="best_score">Best Score</string>
+    <string name="last_score">Last Score</string>
+    <string name="recent_practice_sessions">Recent Practice Sessions</string>
+    <string name="no_practice_data_yet">No practice data yet for this piece.</string>
+    <string name="all_files_summary">All Files Summary</string>
+    <string name="no_practice_data_start">No practice data yet. Start playing to see your progress!</string>
+
+    <!-- File Summary -->
+    <string name="best_last_format">Best: %1$d%% / Last: %2$d%%</string>
+    <string name="sessions_practice_time_format">%1$d sessions, %2$s practice time</string>
+
+    <!-- Session Stats -->
+    <string name="missed">Missed</string>
+    <string name="bpm">BPM</string>
+    <string name="hand_mode">Hand Mode</string>
+    <string name="notes_played">Notes Played:</string>
+    <string name="score_format">Score: %1$d%%</string>
+
+    <!-- Recordings -->
+    <string name="midi_recordings_format">MIDI Recordings (%1$d)</string>
+    <string name="recent_recordings_format">Recent Recordings (%1$d)</string>
+    <string name="no_recordings_yet">No recordings yet for this piece. Start playing with a connected piano to record!</string>
+    <string name="recording">Recording</string>
+    <string name="saved">SAVED</string>
+    <string name="duration_format">Duration: %1$s</string>
+    <string name="bpm_hand_mode_format">%1$d BPM • %2$s</string>
+    <string name="export">Export</string>
+    <string name="delete">Delete</string>
+    <string name="recording_exported_format">Recording exported to:\n%1$s</string>
+    <string name="export_failed">Failed to export recording</string>
+
+    <!-- Recording Dialog -->
+    <string name="play_recording">Play Recording</string>
+    <string name="close">Close</string>
+
+    <!-- Save Recording Dialog -->
+    <string name="save_recording">Save Recording</string>
+    <string name="give_recording_name">Give your recording a name:</string>
+    <string name="recording_title">Recording title</string>
+    <string name="recording_placeholder">My awesome performance</string>
+
+    <!-- Empty States -->
+    <string name="no_practice_data_piece">No practice data yet for this piece.</string>
+
+    <!-- Settings Screen -->
+    <string name="gameplay">Gameplay</string>
+    <string name="audio">Audio</string>
+    <string name="about">About</string>
+
+    <!-- Difficulty Settings -->
+    <string name="difficulty_level">Difficulty Level</string>
+    <string name="difficulty_easy">Easy</string>
+    <string name="difficulty_medium">Medium</string>
+    <string name="difficulty_hard">Hard</string>
+    <string name="difficulty_expert">Expert</string>
+    <string name="difficulty_easy_desc">Generous timing window, key names shown</string>
+    <string name="difficulty_medium_desc">Balanced timing window</string>
+    <string name="difficulty_hard_desc">Precise timing required</string>
+    <string name="difficulty_expert_desc">Professional-level precision</string>
+    <string name="select_difficulty_level">Select Difficulty Level</string>
+    <string name="tolerance_format">%1$s (%2$dms tolerance)</string>
+
+    <!-- Audio Settings -->
+    <string name="show_key_names">Show Key Names</string>
+    <string name="key_names_shown">Key names shown on easy mode</string>
+    <string name="key_names_hidden">Key names hidden</string>
+    <string name="playback_sync_offset">Playback Sync Offset</string>
+    <string name="sync_offset_desc">%1$dms - Adjust if notes aren\'t synchronized</string>
+    <string name="metronome_volume">Metronome Volume</string>
+    <string name="volume_percentage">%1$d%%</string>
+
+    <!-- Sync Dialog -->
+    <string name="adjust_playback_sync">Adjust Playback Sync</string>
+    <string name="sync_adjustment_desc">If the falling notes don\'t align with the audio, adjust this offset. Higher values make notes appear earlier.</string>
+    <string name="offset_milliseconds">Offset (milliseconds)</string>
+    <string name="offset_placeholder">2000</string>
+    <string name="offset_recommendation">Recommended: 2000ms for tablets, 4500ms for phones</string>
+
+    <!-- About Settings -->
+    <string name="view_on_github">View on GitHub</string>
+    <string name="github_desc">Source code, issues, and contributions</string>
+    <string name="app_version">Version 0.5.0</string>
+
+    <!-- Time Formatting -->
+    <string name="time_just_now">just now</string>
+    <string name="time_minutes_ago">%1$dm ago</string>
+    <string name="time_hours_ago">%1$dh ago</string>
+    <string name="time_days_ago">%1$dd ago</string>
+    <string name="time_weeks_ago">%1$dw ago</string>
+    <string name="time_over_month">over a month ago</string>
+
+    <!-- Imported Date -->
+    <string name="imported_format">Imported %1$s</string>
+
+    <!-- Debug Mode -->
+    <string name="debug">DEBUG</string>
+
+    <!-- Additional strings -->
+    <string name="last_played_format">Last played %1$s</string>
+
+    <string name="recent_recordings_count_format">Recent Recordings (%1$d)</string>
+    <string name="best_last_scores_format">Best: %1$d%% / Last: %2$d%%</string>
+    <string name="sessions_practice_format">%1$d sessions, %2$s practice time</string>
+    <string name="notes_played_label">Notes Played:</string>
+    <string name="score_percentage_format">Score: %1$d%%</string>
 </resources>

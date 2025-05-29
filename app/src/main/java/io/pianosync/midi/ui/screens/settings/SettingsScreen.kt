@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -14,10 +13,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import io.pianosync.midi.R
 import io.pianosync.midi.data.model.AppSettings
 import io.pianosync.midi.data.model.DifficultyLevel
 import io.pianosync.midi.data.repository.SettingsRepository
@@ -42,10 +43,13 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Settings") },
+                title = { Text(stringResource(R.string.settings)) },
                 navigationIcon = {
                     IconButton(onClick = onBackPressed) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = stringResource(R.string.back)
+                        )
                     }
                 }
             )
@@ -60,20 +64,23 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Gameplay Settings Section
-            SettingsSection(title = "Gameplay") {
+            SettingsSection(title = stringResource(R.string.gameplay)) {
                 // Difficulty Level
                 SettingsItem(
                     icon = Icons.Default.Speed,
-                    title = "Difficulty Level",
-                    subtitle = "${settings.difficultyLevel.displayName} - ${settings.difficultyLevel.description}",
+                    title = stringResource(R.string.difficulty_level),
+                    subtitle = "${getDifficultyDisplayName(settings.difficultyLevel)} - ${getDifficultyDescription(settings.difficultyLevel)}",
                     onClick = { showDifficultyDialog = true }
                 )
 
                 // Key Names Toggle
                 SettingsItem(
                     icon = Icons.Default.Label,
-                    title = "Show Key Names",
-                    subtitle = if (settings.showKeyNames) "Key names shown on easy mode" else "Key names hidden",
+                    title = stringResource(R.string.show_key_names),
+                    subtitle = if (settings.showKeyNames)
+                        stringResource(R.string.key_names_shown)
+                    else
+                        stringResource(R.string.key_names_hidden),
                     trailing = {
                         Switch(
                             checked = settings.showKeyNames,
@@ -88,12 +95,12 @@ fun SettingsScreen(
             }
 
             // Audio Settings Section
-            SettingsSection(title = "Audio") {
+            SettingsSection(title = stringResource(R.string.audio)) {
                 // Playback Offset
                 SettingsItem(
                     icon = Icons.Default.Sync,
-                    title = "Playback Sync Offset",
-                    subtitle = "${settings.playbackOffsetMs}ms - Adjust if notes aren't synchronized",
+                    title = stringResource(R.string.playback_sync_offset),
+                    subtitle = stringResource(R.string.sync_offset_desc, settings.playbackOffsetMs),
                     onClick = {
                         tempOffsetValue = settings.playbackOffsetMs.toString()
                         showOffsetDialog = true
@@ -103,8 +110,8 @@ fun SettingsScreen(
                 // Metronome Volume
                 SettingsItem(
                     icon = Icons.Default.VolumeUp,
-                    title = "Metronome Volume",
-                    subtitle = "${(settings.metronomeVolume * 100).toInt()}%"
+                    title = stringResource(R.string.metronome_volume),
+                    subtitle = stringResource(R.string.volume_percentage, (settings.metronomeVolume * 100).toInt())
                 ) {
                     Slider(
                         value = settings.metronomeVolume,
@@ -119,12 +126,12 @@ fun SettingsScreen(
             }
 
             // About Section
-            SettingsSection(title = "About") {
+            SettingsSection(title = stringResource(R.string.about)) {
                 // GitHub Link
                 SettingsItem(
                     icon = Icons.Default.Code,
-                    title = "View on GitHub",
-                    subtitle = "Source code, issues, and contributions",
+                    title = stringResource(R.string.view_on_github),
+                    subtitle = stringResource(R.string.github_desc),
                     onClick = {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/clarityuwu/PianoSync/tree/dev-android"))
                         context.startActivity(intent)
@@ -134,8 +141,8 @@ fun SettingsScreen(
                 // App Info
                 SettingsItem(
                     icon = Icons.Default.Info,
-                    title = "PianoSync",
-                    subtitle = "Version 0.5.0 - Piano learning companion app"
+                    title = stringResource(R.string.app_name),
+                    subtitle = stringResource(R.string.app_version)
                 )
             }
         }
@@ -170,6 +177,26 @@ fun SettingsScreen(
             },
             onDismiss = { showOffsetDialog = false }
         )
+    }
+}
+
+@Composable
+private fun getDifficultyDisplayName(level: DifficultyLevel): String {
+    return when (level) {
+        DifficultyLevel.EASY -> stringResource(R.string.difficulty_easy)
+        DifficultyLevel.MEDIUM -> stringResource(R.string.difficulty_medium)
+        DifficultyLevel.HARD -> stringResource(R.string.difficulty_hard)
+        DifficultyLevel.EXPERT -> stringResource(R.string.difficulty_expert)
+    }
+}
+
+@Composable
+private fun getDifficultyDescription(level: DifficultyLevel): String {
+    return when (level) {
+        DifficultyLevel.EASY -> stringResource(R.string.difficulty_easy_desc)
+        DifficultyLevel.MEDIUM -> stringResource(R.string.difficulty_medium_desc)
+        DifficultyLevel.HARD -> stringResource(R.string.difficulty_hard_desc)
+        DifficultyLevel.EXPERT -> stringResource(R.string.difficulty_expert_desc)
     }
 }
 
@@ -261,7 +288,7 @@ fun DifficultySelectionDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Select Difficulty Level") },
+        title = { Text(stringResource(R.string.select_difficulty_level)) },
         text = {
             Column(
                 modifier = Modifier
@@ -289,13 +316,17 @@ fun DifficultySelectionDialog(
 
                         Column {
                             Text(
-                                text = level.displayName,
+                                text = getDifficultyDisplayName(level),
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Medium
                             )
 
                             Text(
-                                text = "${level.description} (${level.correctNoteWindowMs}ms tolerance)",
+                                text = stringResource(
+                                    R.string.tolerance_format,
+                                    getDifficultyDescription(level),
+                                    level.correctNoteWindowMs.toInt()
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -306,7 +337,7 @@ fun DifficultySelectionDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Close")
+                Text(stringResource(R.string.close))
             }
         }
     )
@@ -321,11 +352,11 @@ fun OffsetAdjustmentDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Adjust Playback Sync") },
+        title = { Text(stringResource(R.string.adjust_playback_sync)) },
         text = {
             Column {
                 Text(
-                    text = "If the falling notes don't align with the audio, adjust this offset. Higher values make notes appear earlier.",
+                    text = stringResource(R.string.sync_adjustment_desc),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
@@ -337,13 +368,13 @@ fun OffsetAdjustmentDialog(
                             onOffsetChanged(value)
                         }
                     },
-                    label = { Text("Offset (milliseconds)") },
-                    placeholder = { Text("2000") },
+                    label = { Text(stringResource(R.string.offset_milliseconds)) },
+                    placeholder = { Text(stringResource(R.string.offset_placeholder)) },
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Text(
-                    text = "Recommended: 2000ms for tablets, 4500ms for phones",
+                    text = stringResource(R.string.offset_recommendation),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -358,12 +389,12 @@ fun OffsetAdjustmentDialog(
                 onClick = onSave,
                 enabled = currentOffset.isNotEmpty() && currentOffset.toLongOrNull() != null
             ) {
-                Text("Save")
+                Text(stringResource(R.string.save))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.cancel))
             }
         }
     )

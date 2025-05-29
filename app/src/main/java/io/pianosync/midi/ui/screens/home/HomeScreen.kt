@@ -19,8 +19,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import io.pianosync.midi.R
 import io.pianosync.midi.data.manager.MidiConnectionManager
 import io.pianosync.midi.data.model.MidiFile
 import io.pianosync.midi.data.model.PerformanceRecord
@@ -126,7 +128,7 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("PianoSync") },
+                title = { Text(stringResource(R.string.app_name)) },
                 actions = {
                     // Show debug indicator and connection status
                     Row(
@@ -136,7 +138,7 @@ fun HomeScreen(
                         if (debugMode) {
                             AssistChip(
                                 onClick = { debugMode = !debugMode },
-                                label = { Text("DEBUG") },
+                                label = { Text(stringResource(R.string.debug)) },
                                 modifier = Modifier.padding(end = 8.dp)
                             )
                         }
@@ -147,7 +149,7 @@ fun HomeScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.BarChart,
-                                contentDescription = "Progress Tracking",
+                                contentDescription = stringResource(R.string.progress_tracking),
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
@@ -158,14 +160,14 @@ fun HomeScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Settings,
-                                contentDescription = "Settings",
+                                contentDescription = stringResource(R.string.settings),
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
 
                         Icon(
                             imageVector = if (effectivelyConnected) Icons.Default.Piano else Icons.Default.PianoOff,
-                            contentDescription = if (effectivelyConnected) "Piano Connected" else "Piano Disconnected",
+                            contentDescription = if (effectivelyConnected) stringResource(R.string.piano_connected) else stringResource(R.string.piano_disconnected),
                             tint = if (effectivelyConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                             modifier = Modifier.padding(start = 8.dp)
                         )
@@ -243,12 +245,12 @@ fun HomeScreen(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "Waiting for piano to connect...",
+                            text = stringResource(R.string.waiting_for_piano),
                             style = MaterialTheme.typography.bodyLarge
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Please connect your piano to play ${selectedMidiFile?.name}",
+                            text = stringResource(R.string.connect_piano_message, selectedMidiFile?.name ?: ""),
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Spacer(modifier = Modifier.height(16.dp))
@@ -257,13 +259,13 @@ fun HomeScreen(
                                 onClick = { debugMode = true },
                                 modifier = Modifier.padding(end = 8.dp)
                             ) {
-                                Text("Test Mode")
+                                Text(stringResource(R.string.test_mode))
                             }
                             Button(onClick = {
                                 showConnectionDialog = false
                                 selectedMidiFile = null
                             }) {
-                                Text("Dismiss")
+                                Text(stringResource(R.string.dismiss))
                             }
                         }
                     }

@@ -12,8 +12,8 @@ android {
         applicationId = "io.pianosync.midi"
         minSdk = 28
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.5.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

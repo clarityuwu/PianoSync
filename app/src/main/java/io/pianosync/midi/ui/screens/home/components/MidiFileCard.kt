@@ -18,6 +18,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -33,20 +34,6 @@ import io.pianosync.midi.ui.theme.*
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.roundToInt
-
-/**
- * Enhanced MIDI File Card with beautiful gradient backgrounds and music-themed colors
- *
- * Features:
- * - Intelligent gradient selection based on file characteristics and performance
- * - Smooth press/hover animations with spring physics
- * - Recent activity indicators with subtle pulsing
- * - Enhanced text with subtle shadows for better readability
- * - Progress indicators with glow effects
- * - Performance trend visualization
- *
- * Usage: Replace the existing MidiFileCard in your HomeScreen composable
- */
 
 /**
  * Get a gradient based on the MIDI file's characteristics using the new gradient system
@@ -68,6 +55,7 @@ fun MidiFileCard(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var showDeleteDialog by remember { mutableStateOf(false) }
     var isPressed by remember { mutableStateOf(false) }
 
@@ -218,11 +206,6 @@ fun MidiFileCard(
                             .background(
                                 Color.White.copy(alpha = 0.25f),
                                 RoundedCornerShape(18.dp)
-                            )
-                            .shadow(
-                                elevation = 2.dp,
-                                shape = RoundedCornerShape(18.dp),
-                                ambientColor = Color.White.copy(alpha = 0.3f)
                             ),
                         contentAlignment = Alignment.Center
                     ) {
@@ -303,7 +286,7 @@ fun MidiFileCard(
                 } else {
                     // Show import date if no practice data
                     Text(
-                        text = "Imported ${formatDate(midiFile.dateImported)}",
+                        text = stringResource(R.string.imported_format, formatDate(midiFile.dateImported)),
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontWeight = FontWeight.Medium,
                             shadow = androidx.compose.ui.graphics.Shadow(
@@ -379,11 +362,6 @@ fun ProgressIndicatorBadge(
                         Color.White.copy(alpha = 0.25f),
                         RoundedCornerShape(21.dp)
                     )
-                    .shadow(
-                        elevation = 2.dp,
-                        shape = RoundedCornerShape(21.dp),
-                        ambientColor = Color.White.copy(alpha = 0.3f)
-                    )
             )
 
             CircularProgressIndicator(
@@ -412,7 +390,7 @@ fun ProgressIndicatorBadge(
         // Best score indicator (if different from average)
         if (bestScore > progress) {
             Text(
-                text = "Best: $bestScore%",
+                text = stringResource(R.string.best_last_format, bestScore, progress).split("/")[0], // Just the "Best: X%" part
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontSize = 8.sp,
                     shadow = androidx.compose.ui.graphics.Shadow(
@@ -434,6 +412,8 @@ fun PracticeStatsSection(
     trend: ProgressTrend,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier.fillMaxWidth()
@@ -444,7 +424,11 @@ fun PracticeStatsSection(
             horizontalArrangement = Arrangement.Center
         ) {
             Text(
-                text = "$sessionCount session${if (sessionCount != 1) "s" else ""}",
+                text = context.resources.getQuantityString(
+                    R.plurals.session_count,
+                    sessionCount,
+                    sessionCount
+                ),
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontWeight = FontWeight.Medium,
                     shadow = androidx.compose.ui.graphics.Shadow(
@@ -509,7 +493,7 @@ fun PracticeStatsSection(
         // Last played time with enhanced styling
         lastPlayedTime?.let { timestamp ->
             Text(
-                text = "Last played ${formatRelativeTime(timestamp)}",
+                text = stringResource(R.string.last_played_format, formatRelativeTimeComposable(timestamp)),
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontSize = 11.sp,
                     shadow = androidx.compose.ui.graphics.Shadow(
@@ -562,7 +546,9 @@ private fun calculateProgressData(performances: List<PerformanceRecord>): Progre
     return ProgressData(averageScore, bestScore, trend)
 }
 
-private fun formatRelativeTime(timestamp: Long): String {
+// Create a Composable version for proper string resource access
+@Composable
+private fun formatRelativeTimeComposable(timestamp: Long): String {
     val now = System.currentTimeMillis()
     val diffMs = now - timestamp
 
@@ -571,12 +557,12 @@ private fun formatRelativeTime(timestamp: Long): String {
     val days = diffMs / (1000 * 60 * 60 * 24)
 
     return when {
-        minutes < 1 -> "just now"
-        minutes < 60 -> "${minutes}m ago"
-        hours < 24 -> "${hours}h ago"
-        days < 7 -> "${days}d ago"
-        days < 30 -> "${(days / 7)}w ago"
-        else -> "over a month ago"
+        minutes < 1 -> stringResource(R.string.time_just_now)
+        minutes < 60 -> stringResource(R.string.time_minutes_ago, minutes)
+        hours < 24 -> stringResource(R.string.time_hours_ago, hours)
+        days < 7 -> stringResource(R.string.time_days_ago, days)
+        days < 30 -> stringResource(R.string.time_weeks_ago, (days / 7))
+        else -> stringResource(R.string.time_over_month)
     }
 }
 
