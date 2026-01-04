@@ -2,6 +2,11 @@
 ## Welcome Contributors! 🎹🎶
 First off, thank you for considering contributing to PianoSync. It's people like you that make PianoSync such a great tool for music learners and piano enthusiasts.
 
+## Get the App 📲
+PianoSync is available on Google Play! Download it now to see what you'll be contributing to:
+
+[![Get it on Google Play](https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png)](https://play.google.com/store/apps/details?id=io.scoreflow.app&referrer=utm_source%3Dgithub%26utm_medium%3Dreadme%26utm_campaign%3Dcontributing)
+
 ## Screenshots 📱
 Get a feel for the app and what you'll be contributing to:
 
